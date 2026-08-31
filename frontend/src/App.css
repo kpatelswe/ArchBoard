@@ -30,3 +30,43 @@ h1 {
 .status--checking {
   opacity: 0.6;
 }
+
+.bar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.primary {
+  padding: 0.6rem 1.1rem;
+  font: inherit;
+  font-weight: 600;
+  color: #fff;
+  background: #1f2937;
+  border: none;
+  border-radius: 0.5rem;
+  cursor: pointer;
+}
+
+.card {
+  padding: 1.25rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.75rem;
+}
+
+.card dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.4rem 1rem;
+  margin: 0.75rem 0 0;
+}
+
+.card dt {
+  font-weight: 600;
+  opacity: 0.7;
+}
+
+.card dd {
+  margin: 0;
+}
