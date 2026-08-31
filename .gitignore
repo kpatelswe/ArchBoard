@@ -216,3 +216,14 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+.DS_Store
+**/.DS_Store
+
+# Node / frontend
+node_modules/
+frontend/dist/
+*.local
+npm-debug.log*
+CLAUDE.md
+DECISIONS.md
