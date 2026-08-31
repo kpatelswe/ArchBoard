@@ -230,3 +230,5 @@ DECISIONS.md
 
 # The Python template rules above (lib/, build/, dist/) must not swallow frontend source.
 !frontend/src/lib/
+WALKTHROUGH.md
+TODO.md
