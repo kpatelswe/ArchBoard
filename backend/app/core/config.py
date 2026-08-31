@@ -17,6 +17,10 @@ class Settings(BaseSettings):
     app_env: str = "development"
     frontend_origin: str = "http://localhost:5173"
 
+    # No defaults: a missing database URL should stop the app at startup.
+    database_url: str
+    database_migration_url: str
+
 
 @lru_cache
 def get_settings() -> Settings:
