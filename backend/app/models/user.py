@@ -12,9 +12,9 @@ class User(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
 
-    # Google's immutable account identifier. Email is stored for display only,
-    # never as the identity key: addresses can be renamed and reassigned.
-    google_sub: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    # Clerk's immutable user id. Email is stored for display only, never as the
+    # identity key: addresses can be renamed and reassigned to other people.
+    clerk_user_id: Mapped[str] = mapped_column(String(255), unique=True, index=True)
 
     email: Mapped[str] = mapped_column(String(320))
     name: Mapped[str | None] = mapped_column(String(255), default=None)
