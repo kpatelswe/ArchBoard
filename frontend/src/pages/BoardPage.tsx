@@ -3,6 +3,7 @@ import type { Edge, Node } from '@xyflow/react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { BoardCanvas } from '../canvas/BoardCanvas'
+import { useBoardSocket } from '../lib/useBoardSocket'
 import {
   canonicalize,
   ConflictError,
@@ -23,6 +24,7 @@ export function BoardPage() {
   const [error, setError] = useState<string | null>(null)
   const [saveState, setSaveState] = useState<SaveState>('saved')
   const [shareMessage, setShareMessage] = useState<string | null>(null)
+  const socket = useBoardSocket(boardId)
 
   const version = useRef(0)
   const lastSaved = useRef('')
@@ -104,6 +106,9 @@ export function BoardPage() {
         <Link to="/">← Boards</Link>
         <strong>{board.name}</strong>
         <span className="board__role">{board.role}</span>
+        <span className={`board__live board__live--${socket.state}`}>
+          {socket.state === 'live' ? `● ${socket.peerCount} online` : socket.state}
+        </span>
         {board.role === 'owner' && (
           <span className="board__share">
             {shareMessage ?? (

@@ -325,3 +325,7 @@ h1 a {
   cursor: pointer;
   text-decoration: underline;
 }
+
+.board__live { font-size: 0.78rem; opacity: 0.75; }
+.board__live--live { color: #15803d; }
+.board__live--closed { color: #b91c1c; }
