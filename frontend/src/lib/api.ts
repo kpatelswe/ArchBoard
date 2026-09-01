@@ -48,6 +48,61 @@ export const listBoards = (token: string | null) =>
 export const getBoard = (token: string | null, id: string) =>
   apiFetch<Board>(`/api/boards/${id}`, token)
 
+/** Mirrors the server's PersistedNode/PersistedEdge: transient React Flow
+ *  fields (selected, dragging, measured) are per-viewer, never board state. */
+export function canonicalize(nodes: Node[], edges: Edge[]) {
+  return {
+    nodes: nodes.map((n) => ({
+      id: n.id,
+      type: n.type,
+      position: n.position,
+      data: n.data,
+      width: n.width ?? null,
+      height: n.height ?? null,
+    })),
+    edges: edges.map((e) => ({
+      id: e.id,
+      source: e.source,
+      target: e.target,
+      sourceHandle: e.sourceHandle ?? null,
+      targetHandle: e.targetHandle ?? null,
+      data: e.data ?? {},
+    })),
+  }
+}
+
+export class ConflictError extends Error {
+  current: Board
+
+  constructor(current: Board) {
+    super('board was modified by someone else')
+    this.current = current
+  }
+}
+
+export async function saveSnapshot(
+  token: string | null,
+  id: string,
+  nodes: Node[],
+  edges: Edge[],
+  version: number,
+): Promise<Board> {
+  const response = await fetch(`${API_URL}/api/boards/${id}/snapshot`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ snapshot: canonicalize(nodes, edges), version }),
+  })
+  if (response.status === 409) {
+    const body = await response.json()
+    throw new ConflictError(body.detail.current)
+  }
+  if (!response.ok) throw new Error(`save failed: ${response.status}`)
+  return response.json()
+}
+
 export const createBoard = (token: string | null, name: string) =>
   apiFetch<Board>('/api/boards', token, {
     method: 'POST',

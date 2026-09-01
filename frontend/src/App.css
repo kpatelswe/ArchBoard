@@ -303,3 +303,8 @@ h1 a {
   height: 100%;
   white-space: pre-wrap;
 }
+
+.save--saving { color: #ca8a04; }
+.save--unsaved { color: #ca8a04; }
+.save--saved { color: #15803d; }
+.save--conflict, .save--error { color: #b91c1c; font-weight: 600; }

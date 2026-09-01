@@ -14,7 +14,7 @@ import {
   type Node,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { useCallback, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { CATALOG, type NodeKind } from './catalog'
 import { nodeTypes } from './nodeTypes'
 import { Palette } from './Palette'
@@ -27,13 +27,13 @@ function reactFlowTypeFor(kind: NodeKind) {
   return CATALOG[kind].category === 'annotation' ? kind : 'architecture'
 }
 
-function Canvas({
-  initialNodes,
-  initialEdges,
-}: {
+type CanvasProps = {
   initialNodes: Node[]
   initialEdges: Edge[]
-}) {
+  onGraphChange?: (nodes: Node[], edges: Edge[]) => void
+}
+
+function Canvas({ initialNodes, initialEdges, onGraphChange }: CanvasProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges)
   const wrapper = useRef<HTMLDivElement>(null)
@@ -87,6 +87,10 @@ function Canvas({
     [screenToFlowPosition, setNodes],
   )
 
+  useEffect(() => {
+    onGraphChange?.(nodes, edges)
+  }, [nodes, edges, onGraphChange])
+
   return (
     <div className="canvas" ref={wrapper}>
       <Palette />
@@ -118,7 +122,7 @@ function Canvas({
   )
 }
 
-export function BoardCanvas(props: { initialNodes: Node[]; initialEdges: Edge[] }) {
+export function BoardCanvas(props: CanvasProps) {
   // useReactFlow() only works inside a provider.
   return (
     <ReactFlowProvider>
