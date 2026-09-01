@@ -2,6 +2,7 @@ import { Show, SignInButton, UserButton } from '@clerk/react'
 import { Link, Route, Routes } from 'react-router-dom'
 import { BoardPage } from './pages/BoardPage'
 import { BoardsPage } from './pages/BoardsPage'
+import { InvitePage } from './pages/InvitePage'
 import './App.css'
 
 function App() {
@@ -31,6 +32,7 @@ function App() {
         <Routes>
           <Route path="/" element={<BoardsPage />} />
           <Route path="/boards/:boardId" element={<BoardPage />} />
+          <Route path="/invite/:inviteToken" element={<InvitePage />} />
         </Routes>
       </Show>
     </main>

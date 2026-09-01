@@ -10,12 +10,15 @@ export type User = {
   avatar_url: string | null
 }
 
+export type BoardRole = 'owner' | 'editor' | 'viewer'
+
 export type BoardSummary = {
   id: string
   name: string
   version: number
   created_at: string
   updated_at: string
+  role: BoardRole | null
 }
 
 export type Board = BoardSummary & {
@@ -107,4 +110,20 @@ export const createBoard = (token: string | null, name: string) =>
   apiFetch<Board>('/api/boards', token, {
     method: 'POST',
     body: JSON.stringify({ name }),
+  })
+
+export const createInvite = (
+  token: string | null,
+  boardId: string,
+  role: 'editor' | 'viewer',
+) =>
+  apiFetch<{ token: string; role: string }>(`/api/boards/${boardId}/invites`, token, {
+    method: 'POST',
+    body: JSON.stringify({ role }),
+  })
+
+export const acceptInvite = (token: string | null, inviteToken: string) =>
+  apiFetch<Board>('/api/invites/accept', token, {
+    method: 'POST',
+    body: JSON.stringify({ token: inviteToken }),
   })

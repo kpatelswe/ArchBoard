@@ -6,6 +6,7 @@ import { BoardCanvas } from '../canvas/BoardCanvas'
 import {
   canonicalize,
   ConflictError,
+  createInvite,
   getBoard,
   saveSnapshot,
   type Board,
@@ -21,6 +22,7 @@ export function BoardPage() {
   const [board, setBoard] = useState<Board | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [saveState, setSaveState] = useState<SaveState>('saved')
+  const [shareMessage, setShareMessage] = useState<string | null>(null)
 
   const version = useRef(0)
   const lastSaved = useRef('')
@@ -82,24 +84,54 @@ export function BoardPage() {
 
   useEffect(() => () => clearTimeout(timer.current), [])
 
+  async function onShare(role: 'editor' | 'viewer') {
+    if (!boardId) return
+    const invite = await createInvite(await getToken(), boardId, role)
+    const url = `${window.location.origin}/invite/${invite.token}`
+    await navigator.clipboard.writeText(url)
+    setShareMessage(`${role} link copied`)
+    setTimeout(() => setShareMessage(null), 2500)
+  }
+
   if (error) return <p className="status status--unreachable">{error}</p>
   if (!board) return <p className="status status--checking">Loading board…</p>
+
+  const readOnly = board.role === 'viewer'
 
   return (
     <section className="board">
       <div className="board__bar">
         <Link to="/">← Boards</Link>
         <strong>{board.name}</strong>
+        <span className="board__role">{board.role}</span>
+        {board.role === 'owner' && (
+          <span className="board__share">
+            {shareMessage ?? (
+              <>
+                Share:{' '}
+                <button type="button" onClick={() => onShare('editor')}>
+                  editor
+                </button>{' '}
+                <button type="button" onClick={() => onShare('viewer')}>
+                  viewer
+                </button>
+              </>
+            )}
+          </span>
+        )}
         <span className={`board__meta save--${saveState}`}>
-          {saveState === 'conflict'
-            ? 'Someone else saved — reload to continue'
-            : saveState}
+          {readOnly
+            ? 'view only'
+            : saveState === 'conflict'
+              ? 'Someone else saved — reload to continue'
+              : saveState}
         </span>
       </div>
       <BoardCanvas
         initialNodes={board.current_snapshot.nodes ?? []}
         initialEdges={board.current_snapshot.edges ?? []}
-        onGraphChange={onGraphChange}
+        onGraphChange={readOnly ? undefined : onGraphChange}
+        readOnly={readOnly}
       />
     </section>
   )

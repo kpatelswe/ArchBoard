@@ -308,3 +308,20 @@ h1 a {
 .save--unsaved { color: #ca8a04; }
 .save--saved { color: #15803d; }
 .save--conflict, .save--error { color: #b91c1c; font-weight: 600; }
+
+.board__role {
+  padding: 0.1rem 0.5rem;
+  font-size: 0.75rem;
+  background: #f3f4f6;
+  border-radius: 1rem;
+}
+
+.board__share button {
+  padding: 0;
+  font: inherit;
+  color: #1d4ed8;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-decoration: underline;
+}

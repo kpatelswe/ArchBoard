@@ -31,9 +31,10 @@ type CanvasProps = {
   initialNodes: Node[]
   initialEdges: Edge[]
   onGraphChange?: (nodes: Node[], edges: Edge[]) => void
+  readOnly?: boolean
 }
 
-function Canvas({ initialNodes, initialEdges, onGraphChange }: CanvasProps) {
+function Canvas({ initialNodes, initialEdges, onGraphChange, readOnly = false }: CanvasProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges)
   const wrapper = useRef<HTMLDivElement>(null)
@@ -93,7 +94,7 @@ function Canvas({ initialNodes, initialEdges, onGraphChange }: CanvasProps) {
 
   return (
     <div className="canvas" ref={wrapper}>
-      <Palette />
+      {!readOnly && <Palette />}
       <div
         className="canvas__surface"
         onDrop={onDrop}
@@ -109,7 +110,10 @@ function Canvas({ initialNodes, initialEdges, onGraphChange }: CanvasProps) {
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
           nodeTypes={nodeTypes}
-          deleteKeyCode={['Delete', 'Backspace']}
+          nodesDraggable={!readOnly}
+          nodesConnectable={!readOnly}
+          elementsSelectable
+          deleteKeyCode={readOnly ? null : ['Delete', 'Backspace']}
           fitView
           proOptions={{ hideAttribution: false }}
         >
