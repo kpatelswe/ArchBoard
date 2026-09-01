@@ -16,3 +16,12 @@ class AccessDenied(DomainError):
 
 class VersionConflict(DomainError):
     pass
+
+
+class InsufficientRole(DomainError):
+    """Member of the board, but their role does not permit this action.
+
+    Distinct from AccessDenied (non-member): a member already knows the board
+    exists, so the api layer may answer 403 instead of the hiding 404.
+    """
+

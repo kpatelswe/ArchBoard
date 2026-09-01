@@ -4,11 +4,21 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.board import Board
+from app.models.membership import BoardMember, BoardRole
 
 
 async def create(session: AsyncSession, *, owner_id: uuid.UUID, name: str) -> Board:
+    """Create the board and its owner membership in one transaction.
+
+    A crash between the two inserts must not leave a board no one can access,
+    so there is exactly one commit.
+    """
     board = Board(owner_id=owner_id, name=name)
     session.add(board)
+    await session.flush()  # assigns board.id without committing
+    session.add(
+        BoardMember(board_id=board.id, user_id=owner_id, role=BoardRole.OWNER)
+    )
     await session.commit()
     await session.refresh(board)
     return board
@@ -45,10 +55,14 @@ async def update_snapshot(
     return board
 
 
-async def list_for_owner(session: AsyncSession, owner_id: uuid.UUID) -> list[Board]:
+async def list_for_member(
+    session: AsyncSession, user_id: uuid.UUID
+) -> list[tuple[Board, BoardRole]]:
+    """Boards this user belongs to, owned or shared, with their role."""
     result = await session.execute(
-        select(Board)
-        .where(Board.owner_id == owner_id)
+        select(Board, BoardMember.role)
+        .join(BoardMember, BoardMember.board_id == Board.id)
+        .where(BoardMember.user_id == user_id)
         .order_by(Board.updated_at.desc())
     )
-    return list(result.scalars().all())
+    return [(board, BoardRole(role)) for board, role in result.all()]
