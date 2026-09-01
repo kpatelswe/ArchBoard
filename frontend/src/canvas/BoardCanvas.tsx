@@ -74,7 +74,13 @@ function Canvas({
           id: nextNodeId(),
           type: reactFlowTypeFor(kind),
           position,
-          data: { kind, label: CATALOG[kind].label },
+          // Annotations start empty so the placeholder invites typing;
+          // components start with their type name as a sensible default.
+          data: {
+            kind,
+            label:
+              CATALOG[kind].category === 'annotation' ? '' : CATALOG[kind].label,
+          },
         }),
       )
     },
