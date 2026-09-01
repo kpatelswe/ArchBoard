@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import boards, health, invites, users
+from app.websocket import routes as websocket_routes
 from app.core.config import get_settings
 
 
@@ -21,6 +22,7 @@ def create_app() -> FastAPI:
     app.include_router(users.router)
     app.include_router(boards.router)
     app.include_router(invites.router)
+    app.include_router(websocket_routes.router)
     return app
 
 

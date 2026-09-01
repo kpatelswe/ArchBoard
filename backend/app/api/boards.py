@@ -21,6 +21,7 @@ from app.schemas.board import (
     InviteCreated,
     InviteRead,
 )
+from app.realtime.tickets import TICKET_TTL_SECONDS, mint_ticket
 from app.services import board_service, invite_service
 
 router = APIRouter(prefix="/api/boards", tags=["boards"])
@@ -97,6 +98,26 @@ async def save_snapshot(
                 "current": _with_role(board, role).model_dump(mode="json"),
             },
         )
+
+
+@router.post("/{board_id}/ws-ticket")
+async def create_ws_ticket(
+    board_id: uuid.UUID, user: CurrentUser, session: DbSession
+):
+    """Exchange the (header-borne) Clerk token for a short-lived socket ticket.
+
+    Any member may connect — viewers included; they receive but cannot mutate.
+    """
+    try:
+        await board_service.get_board_with_role(
+            session, user=user, board_id=board_id
+        )
+    except (NotFound, AccessDenied):
+        raise _not_found()
+    return {
+        "ticket": mint_ticket(user_id=user.id, board_id=board_id),
+        "expires_in": TICKET_TTL_SECONDS,
+    }
 
 
 @router.post(
