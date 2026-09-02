@@ -53,25 +53,26 @@ export const getBoard = (token: string | null, id: string) =>
 
 /** Mirrors the server's PersistedNode/PersistedEdge: transient React Flow
  *  fields (selected, dragging, measured) are per-viewer, never board state. */
+export const canonicalNode = (n: Node) => ({
+  id: n.id,
+  type: n.type,
+  position: n.position,
+  data: n.data,
+  width: n.width ?? null,
+  height: n.height ?? null,
+})
+
+export const canonicalEdge = (e: Edge) => ({
+  id: e.id,
+  source: e.source,
+  target: e.target,
+  sourceHandle: e.sourceHandle ?? null,
+  targetHandle: e.targetHandle ?? null,
+  data: e.data ?? {},
+})
+
 export function canonicalize(nodes: Node[], edges: Edge[]) {
-  return {
-    nodes: nodes.map((n) => ({
-      id: n.id,
-      type: n.type,
-      position: n.position,
-      data: n.data,
-      width: n.width ?? null,
-      height: n.height ?? null,
-    })),
-    edges: edges.map((e) => ({
-      id: e.id,
-      source: e.source,
-      target: e.target,
-      sourceHandle: e.sourceHandle ?? null,
-      targetHandle: e.targetHandle ?? null,
-      data: e.data ?? {},
-    })),
-  }
+  return { nodes: nodes.map(canonicalNode), edges: edges.map(canonicalEdge) }
 }
 
 export class ConflictError extends Error {

@@ -1,5 +1,6 @@
 import { useReactFlow } from '@xyflow/react'
 import { useEffect, useRef, useState } from 'react'
+import { useSync } from './SyncContext'
 
 /** Double-click to edit; Escape or blur commits. Enter commits single-line fields. */
 export function EditableLabel({
@@ -13,7 +14,8 @@ export function EditableLabel({
   multiline?: boolean
   placeholder?: string
 }) {
-  const { updateNodeData } = useReactFlow()
+  const { updateNodeData, getNode } = useReactFlow()
+  const emit = useSync()
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(value)
   const ref = useRef<HTMLTextAreaElement>(null)
@@ -25,6 +27,8 @@ export function EditableLabel({
   function commit() {
     setEditing(false)
     updateNodeData(id, { label: draft })
+    const data = getNode(id)?.data
+    if (data) emit({ type: 'node.updated', node_id: id, data: { ...data, label: draft } })
   }
 
   if (!editing) {

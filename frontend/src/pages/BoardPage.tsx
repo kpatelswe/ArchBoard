@@ -3,7 +3,7 @@ import type { Edge, Node } from '@xyflow/react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { BoardCanvas } from '../canvas/BoardCanvas'
-import { useBoardSocket } from '../lib/useBoardSocket'
+import { useBoardSocket, type BoardEvent } from '../lib/useBoardSocket'
 import {
   canonicalize,
   ConflictError,
@@ -25,8 +25,26 @@ export function BoardPage() {
   const [saveState, setSaveState] = useState<SaveState>('saved')
   const [shareMessage, setShareMessage] = useState<string | null>(null)
   const socket = useBoardSocket(boardId)
+  const { subscribe } = socket
+  const socketLive = socket.state === 'live'
 
   const version = useRef(0)
+  const socketLiveRef = useRef(false)
+
+  // On join the server sends its authoritative state, which may be ahead of
+  // the REST fetch (another editor mid-session). Adopt it.
+  useEffect(() => {
+    return subscribe((event: BoardEvent) => {
+      if (event.type === 'connected' && event.snapshot) {
+        version.current = event.version
+        setBoard((current) =>
+          current
+            ? { ...current, current_snapshot: event.snapshot, version: event.version }
+            : current,
+        )
+      }
+    })
+  }, [subscribe])
   const lastSaved = useRef('')
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
@@ -55,6 +73,7 @@ export function BoardPage() {
   const onGraphChange = useCallback(
     (nodes: Node[], edges: Edge[]) => {
       if (!boardId) return
+      if (socketLiveRef.current) return
 
       // Compare the canonical form so pure selection/drag state never
       // triggers a write.
@@ -83,6 +102,10 @@ export function BoardPage() {
     },
     [boardId, getToken],
   )
+
+  useEffect(() => {
+    socketLiveRef.current = socketLive
+  }, [socketLive])
 
   useEffect(() => () => clearTimeout(timer.current), [])
 
@@ -127,16 +150,21 @@ export function BoardPage() {
         <span className={`board__meta save--${saveState}`}>
           {readOnly
             ? 'view only'
-            : saveState === 'conflict'
+            : socketLive
+              ? 'synced live'
+              : saveState === 'conflict'
               ? 'Someone else saved — reload to continue'
               : saveState}
         </span>
       </div>
       <BoardCanvas
+        key={`v${board.version}-${socketLive}`}
         initialNodes={board.current_snapshot.nodes ?? []}
         initialEdges={board.current_snapshot.edges ?? []}
         onGraphChange={readOnly ? undefined : onGraphChange}
         readOnly={readOnly}
+        sendEvent={socket.send}
+        subscribe={subscribe}
       />
     </section>
   )
