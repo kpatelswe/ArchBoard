@@ -1,3 +1,5 @@
+from datetime import UTC, datetime, timedelta
+
 from clerk_backend_api import AuthenticateRequestOptions, Clerk, authenticate_request
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +12,8 @@ from app.repositories import user_repository
 settings = get_settings()
 
 _clerk = Clerk(bearer_auth=settings.clerk_secret_key)
+
+PROFILE_MAX_AGE = timedelta(days=1)
 
 
 def _verify(request: Request) -> str:
@@ -37,11 +41,18 @@ async def get_current_user(
     clerk_user_id = _verify(request)
 
     user = await user_repository.get_by_clerk_id(session, clerk_user_id)
-    if user is not None:
+    # Presence shows names/avatars, so refresh profiles older than a day —
+    # the upsert below refreshes; it was just never called a second time.
+    if user is not None and datetime.now(UTC) - user.updated_at < PROFILE_MAX_AGE:
         return user
 
-    profile = _clerk.users.get(user_id=clerk_user_id)
+    try:
+        profile = _clerk.users.get(user_id=clerk_user_id)
+    except Exception:
+        profile = None
     if profile is None:
+        if user is not None:
+            return user  # Clerk hiccup: stale profile beats a failed request
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="unknown user"
         )
