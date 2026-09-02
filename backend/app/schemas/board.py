@@ -38,10 +38,8 @@ class BoardSnapshotUpdate(BaseModel):
 
 
 class BoardConflict(BaseModel):
-    """Returned with 409 so the client can reconcile without a second fetch."""
-
     detail: str = "board was modified by someone else"
-    current: BoardRead
+    current_version: int
 
 
 class InviteCreate(BaseModel):

@@ -76,11 +76,8 @@ export function canonicalize(nodes: Node[], edges: Edge[]) {
 }
 
 export class ConflictError extends Error {
-  current: Board
-
-  constructor(current: Board) {
+  constructor() {
     super('board was modified by someone else')
-    this.current = current
   }
 }
 
@@ -100,8 +97,7 @@ export async function saveSnapshot(
     body: JSON.stringify({ snapshot: canonicalize(nodes, edges), version }),
   })
   if (response.status === 409) {
-    const body = await response.json()
-    throw new ConflictError(body.detail.current)
+    throw new ConflictError()
   }
   if (!response.ok) throw new Error(`save failed: ${response.status}`)
   return response.json()
