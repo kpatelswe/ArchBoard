@@ -6,6 +6,7 @@ from pydantic import ValidationError
 from app.core.db import SessionLocal
 from app.models.membership import ROLE_RANK, BoardRole
 from app.realtime import events
+from app.realtime.bus import bus
 from app.realtime.manager import BoardConnection, manager
 from app.realtime.state import registry
 from app.realtime.tickets import verify_ticket
@@ -19,6 +20,43 @@ CLOSE_UNAUTHENTICATED = 4401
 CLOSE_FORBIDDEN = 4403
 
 MAX_FRAME_BYTES = 64_000
+
+# Identifies this backend process on the bus, so a process can tell its own
+# published events (already applied locally) from another process's.
+PROCESS_ID = uuid.uuid4().hex
+
+MUTATION_TYPES = events.STRUCTURAL_TYPES | {"node.updated", "edge.updated"}
+
+
+async def _publish(
+    board_id: uuid.UUID, payload: dict, *, exclude_connection_id: str | None = None
+) -> None:
+    await bus.publish(
+        board_id,
+        {"origin": PROCESS_ID, "exclude": exclude_connection_id, "payload": payload},
+    )
+
+
+async def _on_bus_message(board_id: uuid.UUID, message: dict) -> None:
+    """Runs on every subscribed process, including the one that published."""
+    payload = message["payload"]
+
+    # A mutation from ANOTHER process must be applied to this process's copy
+    # of the board, or its joiners and flushes would use a stale graph. Our
+    # own events were applied before publishing. mark_dirty=False: only the
+    # origin process persists a mutation.
+    if message["origin"] != PROCESS_ID and payload["type"] in MUTATION_TYPES:
+        state = registry.peek(board_id)
+        if state is not None:
+            try:
+                event = events.inbound_adapter.validate_python(payload)
+                state.apply(event, mark_dirty=False)
+            except ValidationError:
+                pass  # a foreign process sent junk; don't crash the reader
+
+    await manager.broadcast(
+        board_id, payload, exclude_connection_id=message.get("exclude")
+    )
 
 
 @router.websocket("/ws/boards/{board_id}")
@@ -54,6 +92,8 @@ async def board_websocket(websocket: WebSocket, board_id: uuid.UUID) -> None:
         role=role,
     )
     manager.add(board_id, connection)
+    if manager.count(board_id) == 1:
+        await bus.subscribe(board_id, _on_bus_message)
 
     try:
         await websocket.send_json(
@@ -61,6 +101,7 @@ async def board_websocket(websocket: WebSocket, board_id: uuid.UUID) -> None:
                 "type": "connected",
                 "connection_id": connection.connection_id,
                 "role": role,
+                # Process-local until presence lands (C12).
                 "peer_count": manager.count(board_id),
                 # The live server state may be ahead of what the client
                 # fetched over REST; hand it the truth at join.
@@ -68,14 +109,14 @@ async def board_websocket(websocket: WebSocket, board_id: uuid.UUID) -> None:
                 "version": state.version,
             }
         )
-        await manager.broadcast(
+        await _publish(
             board_id,
             {
                 "type": "board.joined",
                 "user_id": str(user_id),
                 "peer_count": manager.count(board_id),
             },
-            exclude=connection,
+            exclude_connection_id=connection.connection_id,
         )
 
         while True:
@@ -95,10 +136,10 @@ async def board_websocket(websocket: WebSocket, board_id: uuid.UUID) -> None:
             # Cursor traffic is ephemeral: any member may send, nothing is
             # applied or persisted — pure relay.
             if isinstance(event, events.CursorMoved):
-                await manager.broadcast(
+                await _publish(
                     board_id,
                     events.outbound(event, user_id=user_id),
-                    exclude=connection,
+                    exclude_connection_id=connection.connection_id,
                 )
                 continue
 
@@ -117,17 +158,19 @@ async def board_websocket(websocket: WebSocket, board_id: uuid.UUID) -> None:
                 continue
 
             state.schedule_flush(structural=event.type in events.STRUCTURAL_TYPES)
-            await manager.broadcast(
+            await _publish(
                 board_id,
                 events.outbound(event, user_id=user_id),
-                exclude=connection,
+                exclude_connection_id=connection.connection_id,
             )
     except WebSocketDisconnect:
         pass
     finally:
         manager.remove(board_id, connection)
+        if manager.count(board_id) == 0:
+            await bus.unsubscribe(board_id)
         await registry.release(board_id, manager.count(board_id))
-        await manager.broadcast(
+        await _publish(
             board_id,
             {
                 "type": "board.left",

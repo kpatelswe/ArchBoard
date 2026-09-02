@@ -58,9 +58,14 @@ class BoardState:
 
     # -- mutation application ------------------------------------------------
 
-    def apply(self, event: events.MutationEvent) -> bool:
+    def apply(self, event: events.MutationEvent, *, mark_dirty: bool = True) -> bool:
         """Apply one validated event. False means it does not fit the current
-        graph (duplicate id, missing target) and must not be broadcast."""
+        graph (duplicate id, missing target) and must not be broadcast.
+
+        Remote applies (events that another process already owns) pass
+        mark_dirty=False: every process converges its copy, but only the
+        origin process persists, so two processes never race to flush the
+        same mutation."""
         match event:
             case events.NodeCreated(node=node):
                 if node.id in self.nodes:
@@ -106,7 +111,8 @@ class BoardState:
                     return False
             case _:
                 return False
-        self._dirty = True
+        if mark_dirty:
+            self._dirty = True
         return True
 
     # -- persistence ---------------------------------------------------------
@@ -180,6 +186,9 @@ class BoardStateRegistry:
                 state = await BoardState.load(board_id)
                 self._states[board_id] = state
             return state
+
+    def peek(self, board_id: uuid.UUID) -> BoardState | None:
+        return self._states.get(board_id)
 
     async def release(self, board_id: uuid.UUID, remaining_connections: int) -> None:
         if remaining_connections > 0:

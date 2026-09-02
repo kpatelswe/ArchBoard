@@ -46,7 +46,7 @@ class ConnectionManager:
         board_id: uuid.UUID,
         message: dict,
         *,
-        exclude: BoardConnection | None = None,
+        exclude_connection_id: str | None = None,
     ) -> None:
         """Send to every live connection on the board.
 
@@ -55,7 +55,7 @@ class ConnectionManager:
         """
         dead: list[BoardConnection] = []
         for connection in list(self._boards.get(board_id, ())):
-            if connection is exclude:
+            if connection.connection_id == exclude_connection_id:
                 continue
             try:
                 await connection.websocket.send_json(message)
