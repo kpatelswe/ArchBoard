@@ -18,14 +18,14 @@ import {
   type NodeChange,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { canonicalEdge, canonicalNode } from '../lib/api'
 import type { BoardEvent, Peer } from '../lib/useBoardSocket'
 import { RemoteCursors } from './RemoteCursors'
 import { CATALOG, type NodeKind } from './catalog'
 import { nodeTypes } from './nodeTypes'
 import { Palette } from './Palette'
-import { SyncContext } from './SyncContext'
+import { LocksContext, SyncContext, type LockMap } from './SyncContext'
 
 const nextNodeId = () => crypto.randomUUID()
 const POSITION_SEND_MS = 40
@@ -56,6 +56,7 @@ function Canvas({
 }: CanvasProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges)
+  const [remoteLocks, setRemoteLocks] = useState<LockMap>({})
   const { screenToFlowPosition } = useReactFlow()
   const lastPositionSend = useRef(new Map<string, number>())
   const lastCursorSend = useRef(0)
@@ -231,6 +232,28 @@ function Canvas({
             applyEdgeChanges([{ type: 'remove', id: event.edge_id }], current),
           )
           break
+        case 'lock.acquired':
+          setRemoteLocks((current) => ({
+            ...current,
+            [event.node_id]: { user_id: event.user_id, name: event.name ?? null },
+          }))
+          break
+        case 'lock.released':
+          setRemoteLocks((current) => {
+            const next = { ...current }
+            delete next[event.node_id]
+            return next
+          })
+          break
+        case 'board.left':
+          setRemoteLocks((current) =>
+            Object.fromEntries(
+              Object.entries(current).filter(
+                ([, lock]) => lock.user_id !== event.user_id,
+              ),
+            ),
+          )
+          break
       }
     })
   }, [subscribe, setNodes, setEdges])
@@ -241,6 +264,7 @@ function Canvas({
 
   return (
     <SyncContext.Provider value={emit}>
+      <LocksContext.Provider value={remoteLocks}>
       <div className="canvas">
         {!readOnly && <Palette />}
         <div
@@ -273,6 +297,7 @@ function Canvas({
           </ReactFlow>
         </div>
       </div>
+      </LocksContext.Provider>
     </SyncContext.Provider>
   )
 }

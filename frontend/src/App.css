@@ -365,3 +365,12 @@ h1 a {
 }
 
 .board__live--reconnecting { color: #d97706; }
+
+.editable--locked { cursor: not-allowed; opacity: 0.75; }
+
+.editable__lock {
+  margin-left: 0.35rem;
+  font-size: 0.62rem;
+  color: #b45309;
+  white-space: nowrap;
+}
