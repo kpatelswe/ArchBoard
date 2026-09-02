@@ -6,7 +6,7 @@ from pydantic import ValidationError
 from app.core.db import SessionLocal
 from app.models.membership import ROLE_RANK, BoardRole
 from app.realtime import events
-from app.realtime import presence
+from app.realtime import presence, rate_limit
 from app.realtime.bus import bus
 from app.realtime.manager import BoardConnection, manager
 from app.realtime.state import registry
@@ -19,6 +19,7 @@ router = APIRouter()
 # reserves for private use; 1000-3999 belong to the protocol and registries.
 CLOSE_UNAUTHENTICATED = 4401
 CLOSE_FORBIDDEN = 4403
+CLOSE_RATE_LIMITED = 4429  # mirrors HTTP 429
 
 MAX_FRAME_BYTES = 64_000
 
@@ -134,6 +135,21 @@ async def board_websocket(websocket: WebSocket, board_id: uuid.UUID) -> None:
             raw = await websocket.receive_text()
             if len(raw) > MAX_FRAME_BYTES:
                 await websocket.send_json(events.error_frame("frame too large"))
+                continue
+
+            count = await rate_limit.register_event(user_id, board_id)
+            action = rate_limit.verdict(count)
+            if action == "disconnect":
+                # Sustained flooding: stop paying to read this socket at all.
+                await websocket.close(CLOSE_RATE_LIMITED, "rate limit exceeded")
+                break
+            if action == "drop":
+                # Warn exactly once per window, then drop silently — replying
+                # to every flooded frame would amplify the flood.
+                if count == rate_limit.MAX_EVENTS_PER_WINDOW + 1:
+                    await websocket.send_json(
+                        events.error_frame("rate limited: slow down")
+                    )
                 continue
 
             try:

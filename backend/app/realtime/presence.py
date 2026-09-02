@@ -10,20 +10,9 @@ every process writes to the same keys, so the roster is global.
 import json
 import uuid
 
-import redis.asyncio as aioredis
-
-from app.core.config import get_settings
+from app.realtime.redis_client import get_redis as _client
 
 PRESENCE_TTL_SECONDS = 20
-
-_redis: aioredis.Redis | None = None
-
-
-def _client() -> aioredis.Redis:
-    global _redis
-    if _redis is None:
-        _redis = aioredis.from_url(get_settings().redis_url, decode_responses=True)
-    return _redis
 
 
 def _key(board_id: uuid.UUID, user_id: uuid.UUID) -> str:
