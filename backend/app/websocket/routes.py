@@ -1,9 +1,13 @@
 import uuid
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from pydantic import ValidationError
 
 from app.core.db import SessionLocal
+from app.models.membership import ROLE_RANK, BoardRole
+from app.realtime import events
 from app.realtime.manager import BoardConnection, manager
+from app.realtime.state import registry
 from app.realtime.tickets import verify_ticket
 from app.repositories import membership_repository
 
@@ -13,6 +17,8 @@ router = APIRouter()
 # reserves for private use; 1000-3999 belong to the protocol and registries.
 CLOSE_UNAUTHENTICATED = 4401
 CLOSE_FORBIDDEN = 4403
+
+MAX_FRAME_BYTES = 64_000
 
 
 @router.websocket("/ws/boards/{board_id}")
@@ -40,6 +46,7 @@ async def board_websocket(websocket: WebSocket, board_id: uuid.UUID) -> None:
         await websocket.close(CLOSE_FORBIDDEN, "not a member of this board")
         return
 
+    state = await registry.acquire(board_id)
     connection = BoardConnection(
         websocket=websocket,
         connection_id=uuid.uuid4().hex,
@@ -55,6 +62,10 @@ async def board_websocket(websocket: WebSocket, board_id: uuid.UUID) -> None:
                 "connection_id": connection.connection_id,
                 "role": role,
                 "peer_count": manager.count(board_id),
+                # The live server state may be ahead of what the client
+                # fetched over REST; hand it the truth at join.
+                "snapshot": state.to_snapshot(),
+                "version": state.version,
             }
         )
         await manager.broadcast(
@@ -68,13 +79,54 @@ async def board_websocket(websocket: WebSocket, board_id: uuid.UUID) -> None:
         )
 
         while True:
-            # Inbound events are validated and routed in C9; until then the
-            # loop only serves to detect disconnection.
-            await websocket.receive_text()
+            raw = await websocket.receive_text()
+            if len(raw) > MAX_FRAME_BYTES:
+                await websocket.send_json(events.error_frame("frame too large"))
+                continue
+
+            try:
+                event = events.inbound_adapter.validate_json(raw)
+            except ValidationError as error:
+                await websocket.send_json(
+                    events.error_frame(f"invalid event: {error.error_count()} errors")
+                )
+                continue
+
+            # Cursor traffic is ephemeral: any member may send, nothing is
+            # applied or persisted — pure relay.
+            if isinstance(event, events.CursorMoved):
+                await manager.broadcast(
+                    board_id,
+                    events.outbound(event, user_id=user_id),
+                    exclude=connection,
+                )
+                continue
+
+            # Everything else mutates the board: the role captured at connect
+            # gates it with zero database work on the hot path.
+            if ROLE_RANK[connection.role] < ROLE_RANK[BoardRole.EDITOR]:
+                await websocket.send_json(
+                    events.error_frame("viewers cannot mutate the board")
+                )
+                continue
+
+            if not state.apply(event):
+                await websocket.send_json(
+                    events.error_frame(f"{event.type} rejected: stale target")
+                )
+                continue
+
+            state.schedule_flush(structural=event.type in events.STRUCTURAL_TYPES)
+            await manager.broadcast(
+                board_id,
+                events.outbound(event, user_id=user_id),
+                exclude=connection,
+            )
     except WebSocketDisconnect:
         pass
     finally:
         manager.remove(board_id, connection)
+        await registry.release(board_id, manager.count(board_id))
         await manager.broadcast(
             board_id,
             {
