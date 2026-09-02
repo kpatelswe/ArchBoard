@@ -21,7 +21,6 @@ from app.schemas.board import (
     InviteCreated,
     InviteRead,
 )
-from app.realtime.tickets import TICKET_TTL_SECONDS, mint_ticket
 from app.services import board_service, invite_service
 
 router = APIRouter(prefix="/api/boards", tags=["boards"])
@@ -86,38 +85,16 @@ async def save_snapshot(
     except InsufficientRole:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "viewers cannot edit")
     except VersionConflict:
-        board, role = await board_service.get_board_with_role(
+        board, _ = await board_service.get_board_with_role(
             session, user=user, board_id=board_id
         )
-        # Return the winning state alongside the 409 so the client can
-        # reconcile without a second round-trip.
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             {
                 "detail": "board was modified by someone else",
-                "current": _with_role(board, role).model_dump(mode="json"),
+                "current_version": board.version,
             },
         )
-
-
-@router.post("/{board_id}/ws-ticket")
-async def create_ws_ticket(
-    board_id: uuid.UUID, user: CurrentUser, session: DbSession
-):
-    """Exchange the (header-borne) Clerk token for a short-lived socket ticket.
-
-    Any member may connect — viewers included; they receive but cannot mutate.
-    """
-    try:
-        await board_service.get_board_with_role(
-            session, user=user, board_id=board_id
-        )
-    except (NotFound, AccessDenied):
-        raise _not_found()
-    return {
-        "ticket": mint_ticket(user_id=user.id, board_id=board_id),
-        "expires_in": TICKET_TTL_SECONDS,
-    }
 
 
 @router.post(

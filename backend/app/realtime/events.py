@@ -91,12 +91,8 @@ STRUCTURAL_TYPES = {"node.created", "node.deleted", "edge.created", "edge.delete
 
 
 def outbound(event: BaseModel, *, user_id: uuid.UUID) -> dict:
-    """Envelope for broadcast: server-assigned id + attributed sender."""
-    return {
-        "event_id": uuid.uuid4().hex,
-        "user_id": str(user_id),
-        **event.model_dump(mode="json"),
-    }
+    """Envelope for broadcast: the event plus its authenticated sender."""
+    return {"user_id": str(user_id), **event.model_dump(mode="json")}
 
 
 def error_frame(detail: str) -> dict:

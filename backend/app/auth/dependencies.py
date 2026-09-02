@@ -16,6 +16,28 @@ _clerk = Clerk(bearer_auth=settings.clerk_secret_key)
 PROFILE_MAX_AGE = timedelta(days=1)
 
 
+class _TokenRequest:
+    """Minimal request shim so a bare token (e.g. from a WebSocket query
+    string, where the browser cannot set headers) can be verified through
+    the same Clerk path as header-borne tokens."""
+
+    def __init__(self, token: str) -> None:
+        self.headers = {"Authorization": f"Bearer {token}"}
+
+
+def verify_session_token(token: str) -> str | None:
+    """Returns the Clerk user id, or None if the token is invalid."""
+    state = authenticate_request(
+        _TokenRequest(token),
+        AuthenticateRequestOptions(
+            secret_key=settings.clerk_secret_key,
+            authorized_parties=[settings.frontend_origin],
+            accepts_token=["session_token"],
+        ),
+    )
+    return state.payload["sub"] if state.is_signed_in else None
+
+
 def _verify(request: Request) -> str:
     """Verify the Clerk session token and return the Clerk user id."""
     state = authenticate_request(

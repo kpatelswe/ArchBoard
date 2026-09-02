@@ -6,13 +6,12 @@ from pydantic import ValidationError
 from app.core.db import SessionLocal
 from app.models.membership import ROLE_RANK, BoardRole
 from app.realtime import events
-from app.models.user import User
 from app.realtime import presence
 from app.realtime.bus import bus
 from app.realtime.manager import BoardConnection, manager
 from app.realtime.state import registry
-from app.realtime.tickets import verify_ticket
-from app.repositories import membership_repository
+from app.auth.dependencies import verify_session_token
+from app.repositories import membership_repository, user_repository
 
 router = APIRouter()
 
@@ -68,24 +67,29 @@ async def board_websocket(websocket: WebSocket, board_id: uuid.UUID) -> None:
     # closing lets the client read *why*.
     await websocket.accept()
 
-    user_id = verify_ticket(
-        websocket.query_params.get("ticket", ""), board_id=board_id
-    )
-    if user_id is None:
-        await websocket.close(CLOSE_UNAUTHENTICATED, "invalid or expired ticket")
+    # Browser WebSockets cannot set headers, so the Clerk token rides the
+    # query string. It is short-lived (~60s) and the socket outlives it —
+    # it only authenticates the handshake.
+    clerk_user_id = verify_session_token(websocket.query_params.get("token", ""))
+    if clerk_user_id is None:
+        await websocket.close(CLOSE_UNAUTHENTICATED, "invalid or expired token")
         return
 
-    # The ticket proved identity; membership is re-checked live so a role
-    # change between mint and connect is honored. The session is opened and
-    # closed around this one query — never held for the socket's lifetime.
+    # One short-lived session for the auth queries — never held for the
+    # socket's lifetime.
     async with SessionLocal() as session:
-        role = await membership_repository.get_role(
-            session, board_id=board_id, user_id=user_id
+        user = await user_repository.get_by_clerk_id(session, clerk_user_id)
+        role = (
+            await membership_repository.get_role(
+                session, board_id=board_id, user_id=user.id
+            )
+            if user
+            else None
         )
-        user = await session.get(User, user_id) if role else None
-    if role is None or user is None:
+    if user is None or role is None:
         await websocket.close(CLOSE_FORBIDDEN, "not a member of this board")
         return
+    user_id = user.id
 
     await presence.mark(
         board_id, user_id, name=user.name, avatar_url=user.avatar_url

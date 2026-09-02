@@ -25,16 +25,12 @@ export function useBoardSocket(boardId: string | undefined) {
     let cancelled = false
 
     async function open() {
+      // Browser WebSockets cannot set headers; the short-lived (~60s) Clerk
+      // token rides the query string and only authenticates the handshake.
       const token = await getToken()
-      const response = await fetch(`${API_URL}/api/boards/${boardId}/ws-ticket`, {
-        method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      })
-      if (!response.ok || cancelled) return
-      const { ticket } = await response.json()
-
+      if (!token || cancelled) return
       const socket = new WebSocket(
-        `${WS_URL}/ws/boards/${boardId}?ticket=${ticket}`,
+        `${WS_URL}/ws/boards/${boardId}?token=${token}`,
       )
       socketRef.current = socket
       socket.onopen = () => !cancelled && setState('live')
