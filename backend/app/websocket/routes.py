@@ -6,7 +6,7 @@ from pydantic import ValidationError
 from app.core.db import SessionLocal
 from app.models.membership import ROLE_RANK, BoardRole
 from app.realtime import events
-from app.realtime import presence, rate_limit
+from app.realtime import locks, presence, rate_limit
 from app.realtime.bus import bus
 from app.realtime.manager import BoardConnection, manager
 from app.realtime.state import registry
@@ -164,6 +164,41 @@ async def board_websocket(websocket: WebSocket, board_id: uuid.UUID) -> None:
                 await presence.mark(
                     board_id, user_id, name=user.name, avatar_url=user.avatar_url
                 )
+                continue
+
+            if isinstance(event, (events.LockAcquire, events.LockRelease)):
+                if ROLE_RANK[connection.role] < ROLE_RANK[BoardRole.EDITOR]:
+                    continue  # viewers cannot edit, so cannot lock
+                if isinstance(event, events.LockAcquire):
+                    holder = await locks.acquire(
+                        board_id, event.node_id, user_id=user_id, name=user.name
+                    )
+                    if holder is not None:
+                        await websocket.send_json(
+                            {
+                                "type": "lock.denied",
+                                "node_id": event.node_id,
+                                "name": holder.get("name"),
+                            }
+                        )
+                        continue
+                    await _publish(
+                        board_id,
+                        {
+                            "type": "lock.acquired",
+                            "node_id": event.node_id,
+                            "user_id": str(user_id),
+                            "name": user.name,
+                        },
+                        exclude_connection_id=connection.connection_id,
+                    )
+                else:
+                    if await locks.release(board_id, event.node_id, user_id=user_id):
+                        await _publish(
+                            board_id,
+                            {"type": "lock.released", "node_id": event.node_id},
+                            exclude_connection_id=connection.connection_id,
+                        )
                 continue
 
             # Cursor traffic is ephemeral: any member may send, nothing is

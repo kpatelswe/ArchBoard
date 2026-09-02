@@ -64,6 +64,18 @@ class PresencePing(BaseModel):
     type: Literal["presence.ping"]
 
 
+class LockAcquire(BaseModel):
+    """Advisory: 'I am editing this node's text.' Refreshed while editing."""
+
+    type: Literal["lock.acquire"]
+    node_id: str = Field(min_length=1, max_length=100)
+
+
+class LockRelease(BaseModel):
+    type: Literal["lock.release"]
+    node_id: str = Field(min_length=1, max_length=100)
+
+
 InboundEvent = Annotated[
     Union[
         NodeCreated,
@@ -74,6 +86,8 @@ InboundEvent = Annotated[
         EdgeDeleted,
         CursorMoved,
         PresencePing,
+        LockAcquire,
+        LockRelease,
     ],
     Field(discriminator="type"),
 ]
