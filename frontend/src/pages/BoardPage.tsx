@@ -31,8 +31,10 @@ export function BoardPage() {
   const version = useRef(0)
   const socketLiveRef = useRef(false)
 
-  // On join the server sends its authoritative state, which may be ahead of
-  // the REST fetch (another editor mid-session). Adopt it.
+  // Every (re)connect greeting carries the server's authoritative state.
+  // Adopting it IS the reconnect recovery (PRD §23): replace stale local
+  // state, bump the resync counter so the canvas remounts fresh.
+  const [resyncCount, setResyncCount] = useState(0)
   useEffect(() => {
     return subscribe((event: BoardEvent) => {
       if (event.type === 'connected' && event.snapshot) {
@@ -42,6 +44,7 @@ export function BoardPage() {
             ? { ...current, current_snapshot: event.snapshot, version: event.version }
             : current,
         )
+        setResyncCount((count) => count + 1)
       }
     })
   }, [subscribe])
@@ -130,7 +133,11 @@ export function BoardPage() {
         <strong>{board.name}</strong>
         <span className="board__role">{board.role}</span>
         <span className={`board__live board__live--${socket.state}`}>
-          {socket.state === 'live' ? `● ${socket.peers.length} online` : socket.state}
+          {socket.state === 'live'
+            ? `● ${socket.peers.length} online`
+            : socket.state === 'reconnecting'
+              ? 'reconnecting…'
+              : socket.state}
         </span>
         <span className="board__peers">
           {socket.peers.map((peer) =>
@@ -175,7 +182,7 @@ export function BoardPage() {
         </span>
       </div>
       <BoardCanvas
-        key={`v${board.version}-${socketLive}`}
+        key={`sync-${resyncCount}`}
         initialNodes={board.current_snapshot.nodes ?? []}
         initialEdges={board.current_snapshot.edges ?? []}
         onGraphChange={readOnly ? undefined : onGraphChange}
