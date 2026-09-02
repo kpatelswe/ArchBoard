@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     database_migration_url: str
     clerk_secret_key: str
 
+    # Ephemeral coordination only — never durable state (PRD §13).
+    redis_url: str = "redis://localhost:6379/0"
+
 
 @lru_cache
 def get_settings() -> Settings:
