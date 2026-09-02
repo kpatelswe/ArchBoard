@@ -6,13 +6,17 @@ const WS_URL = API_URL.replace(/^http/, 'ws')
 
 type SocketState = 'connecting' | 'live' | 'closed'
 
+export type Peer = { user_id: string; name: string | null; avatar_url: string | null }
+
+const HEARTBEAT_MS = 10_000
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type BoardEvent = Record<string, any> & { type: string }
 
 export function useBoardSocket(boardId: string | undefined) {
   const { getToken } = useAuth()
   const [state, setState] = useState<SocketState>('connecting')
-  const [peerCount, setPeerCount] = useState(0)
+  const [peers, setPeers] = useState<Peer[]>([])
   const socketRef = useRef<WebSocket | null>(null)
   const handlersRef = useRef(new Set<(event: BoardEvent) => void>())
 
@@ -37,9 +41,29 @@ export function useBoardSocket(boardId: string | undefined) {
       socket.onclose = () => !cancelled && setState('closed')
       socket.onmessage = (raw) => {
         const event: BoardEvent = JSON.parse(raw.data)
-        if ('peer_count' in event) setPeerCount(event.peer_count)
+        if (event.type === 'connected') setPeers(event.presence ?? [])
+        if (event.type === 'board.joined')
+          setPeers((current) =>
+            current.some((peer) => peer.user_id === event.user_id)
+              ? current
+              : current.concat({
+                  user_id: event.user_id,
+                  name: event.name ?? null,
+                  avatar_url: event.avatar_url ?? null,
+                }),
+          )
+        if (event.type === 'board.left')
+          setPeers((current) =>
+            current.filter((peer) => peer.user_id !== event.user_id),
+          )
         handlersRef.current.forEach((handler) => handler(event))
       }
+      // The TTL is the failure detector: stop beating and we expire in 20s.
+      const heartbeat = setInterval(() => {
+        if (socket.readyState === WebSocket.OPEN)
+          socket.send(JSON.stringify({ type: 'presence.ping' }))
+      }, HEARTBEAT_MS)
+      socket.addEventListener('close', () => clearInterval(heartbeat))
     }
 
     void open()
@@ -66,5 +90,5 @@ export function useBoardSocket(boardId: string | undefined) {
     }
   }, [])
 
-  return { state, peerCount, send, subscribe }
+  return { state, peers, send, subscribe }
 }

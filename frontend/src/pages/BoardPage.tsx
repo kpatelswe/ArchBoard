@@ -130,7 +130,24 @@ export function BoardPage() {
         <strong>{board.name}</strong>
         <span className="board__role">{board.role}</span>
         <span className={`board__live board__live--${socket.state}`}>
-          {socket.state === 'live' ? `● ${socket.peerCount} online` : socket.state}
+          {socket.state === 'live' ? `● ${socket.peers.length} online` : socket.state}
+        </span>
+        <span className="board__peers">
+          {socket.peers.map((peer) =>
+            peer.avatar_url ? (
+              <img
+                key={peer.user_id}
+                className="peer-chip"
+                src={peer.avatar_url}
+                alt={peer.name ?? 'collaborator'}
+                title={peer.name ?? undefined}
+              />
+            ) : (
+              <span key={peer.user_id} className="peer-chip peer-chip--initial" title={peer.name ?? undefined}>
+                {(peer.name ?? '?').slice(0, 1)}
+              </span>
+            ),
+          )}
         </span>
         {board.role === 'owner' && (
           <span className="board__share">
@@ -165,6 +182,7 @@ export function BoardPage() {
         readOnly={readOnly}
         sendEvent={socket.send}
         subscribe={subscribe}
+        peers={socket.peers}
       />
     </section>
   )

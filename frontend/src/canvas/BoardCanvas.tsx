@@ -20,7 +20,8 @@ import {
 import '@xyflow/react/dist/style.css'
 import { useCallback, useEffect, useRef } from 'react'
 import { canonicalEdge, canonicalNode } from '../lib/api'
-import type { BoardEvent } from '../lib/useBoardSocket'
+import type { BoardEvent, Peer } from '../lib/useBoardSocket'
+import { RemoteCursors } from './RemoteCursors'
 import { CATALOG, type NodeKind } from './catalog'
 import { nodeTypes } from './nodeTypes'
 import { Palette } from './Palette'
@@ -41,6 +42,7 @@ type CanvasProps = {
   readOnly?: boolean
   sendEvent?: (event: BoardEvent) => void
   subscribe?: (handler: (event: BoardEvent) => void) => () => void
+  peers?: Peer[]
 }
 
 function Canvas({
@@ -50,11 +52,25 @@ function Canvas({
   readOnly = false,
   sendEvent,
   subscribe,
+  peers = [],
 }: CanvasProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges)
   const { screenToFlowPosition } = useReactFlow()
   const lastPositionSend = useRef(new Map<string, number>())
+  const lastCursorSend = useRef(0)
+
+  const onPointerMove = useCallback(
+    (event: React.PointerEvent) => {
+      if (!sendEvent) return
+      const now = performance.now()
+      if (now - lastCursorSend.current < 40) return
+      lastCursorSend.current = now
+      const point = screenToFlowPosition({ x: event.clientX, y: event.clientY })
+      sendEvent({ type: 'cursor.moved', x: point.x, y: point.y })
+    },
+    [sendEvent, screenToFlowPosition],
+  )
 
   const emit = useCallback(
     (event: BoardEvent) => {
@@ -229,6 +245,7 @@ function Canvas({
         {!readOnly && <Palette />}
         <div
           className="canvas__surface"
+          onPointerMove={onPointerMove}
           onDrop={onDrop}
           onDragOver={(event) => {
             event.preventDefault()
@@ -252,6 +269,7 @@ function Canvas({
             <Background gap={16} />
             <Controls />
             <MiniMap pannable zoomable />
+            {subscribe && <RemoteCursors subscribe={subscribe} peers={peers} />}
           </ReactFlow>
         </div>
       </div>

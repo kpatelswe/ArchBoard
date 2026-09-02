@@ -329,3 +329,37 @@ h1 a {
 .board__live { font-size: 0.78rem; opacity: 0.75; }
 .board__live--live { color: #15803d; }
 .board__live--closed { color: #b91c1c; }
+
+.board__peers { display: inline-flex; gap: 0.25rem; }
+
+.peer-chip {
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.peer-chip--initial {
+  display: grid;
+  place-items: center;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #fff;
+  background: #64748b;
+}
+
+.cursor {
+  position: absolute;
+  z-index: 10;
+  pointer-events: none;
+  transition: transform 60ms linear;
+}
+
+.cursor__name {
+  margin-left: 0.6rem;
+  padding: 0.1rem 0.4rem;
+  font-size: 0.65rem;
+  color: #fff;
+  border-radius: 0.3rem;
+  white-space: nowrap;
+}
