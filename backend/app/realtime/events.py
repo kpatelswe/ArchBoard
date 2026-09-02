@@ -58,6 +58,12 @@ class CursorMoved(BaseModel):
     label: str | None = Field(default=None, max_length=MAX_LABEL)
 
 
+class PresencePing(BaseModel):
+    """Client heartbeat; refreshes the presence TTL, never broadcast."""
+
+    type: Literal["presence.ping"]
+
+
 InboundEvent = Annotated[
     Union[
         NodeCreated,
@@ -67,6 +73,7 @@ InboundEvent = Annotated[
         EdgeUpdated,
         EdgeDeleted,
         CursorMoved,
+        PresencePing,
     ],
     Field(discriminator="type"),
 ]

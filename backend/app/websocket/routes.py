@@ -6,6 +6,8 @@ from pydantic import ValidationError
 from app.core.db import SessionLocal
 from app.models.membership import ROLE_RANK, BoardRole
 from app.realtime import events
+from app.models.user import User
+from app.realtime import presence
 from app.realtime.bus import bus
 from app.realtime.manager import BoardConnection, manager
 from app.realtime.state import registry
@@ -80,9 +82,14 @@ async def board_websocket(websocket: WebSocket, board_id: uuid.UUID) -> None:
         role = await membership_repository.get_role(
             session, board_id=board_id, user_id=user_id
         )
-    if role is None:
+        user = await session.get(User, user_id) if role else None
+    if role is None or user is None:
         await websocket.close(CLOSE_FORBIDDEN, "not a member of this board")
         return
+
+    await presence.mark(
+        board_id, user_id, name=user.name, avatar_url=user.avatar_url
+    )
 
     state = await registry.acquire(board_id)
     connection = BoardConnection(
@@ -101,8 +108,7 @@ async def board_websocket(websocket: WebSocket, board_id: uuid.UUID) -> None:
                 "type": "connected",
                 "connection_id": connection.connection_id,
                 "role": role,
-                # Process-local until presence lands (C12).
-                "peer_count": manager.count(board_id),
+                "presence": await presence.roster(board_id),
                 # The live server state may be ahead of what the client
                 # fetched over REST; hand it the truth at join.
                 "snapshot": state.to_snapshot(),
@@ -114,7 +120,8 @@ async def board_websocket(websocket: WebSocket, board_id: uuid.UUID) -> None:
             {
                 "type": "board.joined",
                 "user_id": str(user_id),
-                "peer_count": manager.count(board_id),
+                "name": user.name,
+                "avatar_url": user.avatar_url,
             },
             exclude_connection_id=connection.connection_id,
         )
@@ -130,6 +137,12 @@ async def board_websocket(websocket: WebSocket, board_id: uuid.UUID) -> None:
             except ValidationError as error:
                 await websocket.send_json(
                     events.error_frame(f"invalid event: {error.error_count()} errors")
+                )
+                continue
+
+            if isinstance(event, events.PresencePing):
+                await presence.mark(
+                    board_id, user_id, name=user.name, avatar_url=user.avatar_url
                 )
                 continue
 
@@ -170,11 +183,8 @@ async def board_websocket(websocket: WebSocket, board_id: uuid.UUID) -> None:
         if manager.count(board_id) == 0:
             await bus.unsubscribe(board_id)
         await registry.release(board_id, manager.count(board_id))
+        await presence.clear(board_id, user_id)
         await _publish(
             board_id,
-            {
-                "type": "board.left",
-                "user_id": str(user_id),
-                "peer_count": manager.count(board_id),
-            },
+            {"type": "board.left", "user_id": str(user_id)},
         )
