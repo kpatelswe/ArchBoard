@@ -14,9 +14,7 @@ from app.models import *  # noqa: F401,F403  (import models so autogenerate sees
 # access to the values within the .ini file in use.
 config = context.config
 
-# Migrations run against the direct endpoint: transaction-mode pooling breaks
-# session-scoped operations such as advisory locks and concurrent index builds.
-config.set_main_option("sqlalchemy.url", get_settings().database_migration_url)
+config.set_main_option("sqlalchemy.url", get_settings().database_url)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
@@ -73,7 +71,7 @@ async def run_async_migrations() -> None:
     """
 
     connectable = create_async_engine(
-        get_settings().database_migration_url,
+        get_settings().database_url,
         poolclass=pool.NullPool,
         connect_args=CONNECT_ARGS,
     )

@@ -19,7 +19,6 @@ class Settings(BaseSettings):
 
     # No defaults: a missing value should stop the app at startup.
     database_url: str
-    database_migration_url: str
     clerk_secret_key: str
 
     # Ephemeral coordination only — never durable state (PRD §13).
