@@ -16,7 +16,7 @@ import {
   type NodeChange,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type * as Y from 'yjs'
 import {
   flowFromDoc,
@@ -32,7 +32,7 @@ import { RemoteCursors } from './RemoteCursors'
 import { CATALOG, type NodeKind } from './catalog'
 import { nodeTypes } from './nodeTypes'
 import { Palette } from './Palette'
-import { BoardDocContext } from './SyncContext'
+import { BoardDocContext, EditingContext, EmitContext, type EditingMap } from './SyncContext'
 
 const nextNodeId = () => crypto.randomUUID()
 const POSITION_SEND_MS = 40
@@ -61,9 +61,57 @@ function Canvas({
 }: CanvasProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
+  const [remoteEditing, setRemoteEditing] = useState<EditingMap>({})
+  const editingExpiry = useRef(new Map<string, number>())
   const { screenToFlowPosition } = useReactFlow()
   const lastPositionSend = useRef(new Map<string, number>())
   const lastCursorSend = useRef(0)
+
+  // Editing awareness: highlight nodes someone else is editing. Ephemeral
+  // relay only — each mark expires locally unless refreshed, so a crashed
+  // editor's highlight fades on its own instead of sticking forever.
+  useEffect(() => {
+    if (!subscribe) return
+    const unsubscribe = subscribe((event) => {
+      if (event.type === 'editing.started') {
+        editingExpiry.current.set(event.node_id, performance.now() + 5_000)
+        setRemoteEditing((current) => ({
+          ...current,
+          [event.node_id]: { user_id: event.user_id, name: event.name ?? null },
+        }))
+      } else if (event.type === 'editing.stopped') {
+        editingExpiry.current.delete(event.node_id)
+        setRemoteEditing(({ [event.node_id]: _gone, ...rest }) => rest)
+      } else if (event.type === 'board.left') {
+        setRemoteEditing((current) =>
+          Object.fromEntries(
+            Object.entries(current).filter(([nodeId, editor]) => {
+              if (editor.user_id !== event.user_id) return true
+              editingExpiry.current.delete(nodeId)
+              return false
+            }),
+          ),
+        )
+      }
+    })
+    const prune = setInterval(() => {
+      const now = performance.now()
+      const expired = [...editingExpiry.current].filter(([, at]) => at < now)
+      if (expired.length === 0) return
+      for (const [nodeId] of expired) editingExpiry.current.delete(nodeId)
+      setRemoteEditing((current) =>
+        Object.fromEntries(
+          Object.entries(current).filter(
+            ([nodeId]) => !expired.some(([gone]) => gone === nodeId),
+          ),
+        ),
+      )
+    }, 1_000)
+    return () => {
+      unsubscribe()
+      clearInterval(prune)
+    }
+  }, [subscribe])
 
   // Viewers never write to the shared document; their replica is read-only.
   const writable = !readOnly && docReady ? doc : null
@@ -199,8 +247,17 @@ function Canvas({
     [screenToFlowPosition, setNodes, writable],
   )
 
+  const emit = useCallback(
+    (event: BoardEvent) => {
+      if (!readOnly) sendEvent?.(event)
+    },
+    [readOnly, sendEvent],
+  )
+
   return (
     <BoardDocContext.Provider value={writable}>
+      <EmitContext.Provider value={emit}>
+      <EditingContext.Provider value={remoteEditing}>
       <div className="canvas">
         {!readOnly && <Palette />}
         <div
@@ -233,6 +290,8 @@ function Canvas({
           </ReactFlow>
         </div>
       </div>
+      </EditingContext.Provider>
+      </EmitContext.Provider>
     </BoardDocContext.Provider>
   )
 }

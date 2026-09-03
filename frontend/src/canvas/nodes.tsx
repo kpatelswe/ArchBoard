@@ -3,7 +3,14 @@ import { setNodeFields } from '../lib/boardDoc'
 import { CATALOG, type ArchNodeData } from './catalog'
 import { EditableLabel } from './EditableLabel'
 import { KindIcon } from './icons'
-import { useBoardDoc } from './SyncContext'
+import { useBoardDoc, useRemoteEditing } from './SyncContext'
+
+/** "<name> is editing this" chip + outline, driven by awareness events. */
+function RemoteEditorTag({ id }: { id: string }) {
+  const editor = useRemoteEditing()[id]
+  if (!editor) return null
+  return <span className="editor-tag">✎ {editor.name ?? 'someone'}</span>
+}
 
 type Props = NodeProps & { data: ArchNodeData }
 
@@ -63,6 +70,7 @@ export function ArchitectureNode(props: Props) {
       className={`node node--arch ${selected ? 'is-selected' : ''}`}
       style={{ '--kind': entry.accent } as React.CSSProperties}
     >
+      <RemoteEditorTag id={id} />
       <TechnologyMenu {...props} />
       <Handle type="target" position={Position.Top} />
       <span className="node__icon">
@@ -85,6 +93,7 @@ export function ArchitectureNode(props: Props) {
 export function StickyNoteNode({ id, data, selected }: Props) {
   return (
     <div className={`node node--sticky ${selected ? 'is-selected' : ''}`}>
+      <RemoteEditorTag id={id} />
       <NodeResizer minWidth={120} minHeight={90} isVisible={selected} />
       <EditableLabel id={id} value={data.label} multiline placeholder="Note…" />
     </div>
@@ -94,6 +103,7 @@ export function StickyNoteNode({ id, data, selected }: Props) {
 export function TextNode({ id, data, selected }: Props) {
   return (
     <div className={`node node--text ${selected ? 'is-selected' : ''}`}>
+      <RemoteEditorTag id={id} />
       <EditableLabel id={id} value={data.label} placeholder="Text" />
     </div>
   )
@@ -102,6 +112,7 @@ export function TextNode({ id, data, selected }: Props) {
 export function ShapeNode({ id, data, selected }: Props) {
   return (
     <div className={`node node--shape ${selected ? 'is-selected' : ''}`}>
+      <RemoteEditorTag id={id} />
       <NodeResizer minWidth={80} minHeight={60} isVisible={selected} />
       <span className="node__shape-label">
         <EditableLabel id={id} value={data.label} placeholder="Label" />

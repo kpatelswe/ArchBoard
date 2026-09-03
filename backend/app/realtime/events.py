@@ -1,9 +1,10 @@
-"""The realtime event protocol.
+"""The JSON side of the realtime protocol.
 
-Inbound frames are parsed into exactly one of these models or rejected; the
-broadcast re-serializes the *model*, so raw client JSON is never forwarded
-(PRD §21). Node/edge payloads reuse the snapshot schemas — the wire format and
-the storage format are deliberately the same shape.
+Board mutations travel as binary CRDT updates and never pass through here.
+What remains is the ephemeral, human-facing traffic: cursors, presence
+heartbeats, and editing awareness. Inbound frames are parsed into exactly one
+of these models or rejected; the broadcast re-serializes the *model*, so raw
+client JSON is never forwarded (PRD §21).
 """
 
 import uuid
@@ -11,44 +12,7 @@ from typing import Annotated, Literal, Union
 
 from pydantic import BaseModel, Field, TypeAdapter
 
-from app.schemas.snapshot import MAX_LABEL, NodeData, PersistedEdge, PersistedNode, Position
-
-
-class NodeCreated(BaseModel):
-    type: Literal["node.created"]
-    node: PersistedNode
-
-
-class NodeUpdated(BaseModel):
-    """Partial update: only the supplied fields change."""
-
-    type: Literal["node.updated"]
-    node_id: str = Field(min_length=1, max_length=100)
-    position: Position | None = None
-    data: NodeData | None = None
-    width: float | None = None
-    height: float | None = None
-
-
-class NodeDeleted(BaseModel):
-    type: Literal["node.deleted"]
-    node_id: str = Field(min_length=1, max_length=100)
-
-
-class EdgeCreated(BaseModel):
-    type: Literal["edge.created"]
-    edge: PersistedEdge
-
-
-class EdgeUpdated(BaseModel):
-    type: Literal["edge.updated"]
-    edge_id: str = Field(min_length=1, max_length=100)
-    data: dict = Field(default_factory=dict)
-
-
-class EdgeDeleted(BaseModel):
-    type: Literal["edge.deleted"]
-    edge_id: str = Field(min_length=1, max_length=100)
+from app.schemas.snapshot import MAX_LABEL
 
 
 class CursorMoved(BaseModel):
@@ -64,44 +28,28 @@ class PresencePing(BaseModel):
     type: Literal["presence.ping"]
 
 
-class LockAcquire(BaseModel):
-    """Advisory: 'I am editing this node's text.' Refreshed while editing."""
+class EditingStarted(BaseModel):
+    """Awareness, not a lock: 'I am editing this node.' Nothing is enforced —
+    the CRDT merges concurrent edits — this only paints the highlight on
+    everyone else's screen. Refreshed while editing; remote peers expire it
+    on their own clock, so a crashed editor's highlight fades by itself."""
 
-    type: Literal["lock.acquire"]
+    type: Literal["editing.started"]
     node_id: str = Field(min_length=1, max_length=100)
 
 
-class LockRelease(BaseModel):
-    type: Literal["lock.release"]
+class EditingStopped(BaseModel):
+    type: Literal["editing.stopped"]
     node_id: str = Field(min_length=1, max_length=100)
 
 
 InboundEvent = Annotated[
-    Union[
-        NodeCreated,
-        NodeUpdated,
-        NodeDeleted,
-        EdgeCreated,
-        EdgeUpdated,
-        EdgeDeleted,
-        CursorMoved,
-        PresencePing,
-        LockAcquire,
-        LockRelease,
-    ],
+    Union[CursorMoved, PresencePing, EditingStarted, EditingStopped],
     Field(discriminator="type"),
 ]
 
 # One reusable parser; validate_json goes straight from bytes to model.
 inbound_adapter: TypeAdapter[InboundEvent] = TypeAdapter(InboundEvent)
-
-MutationEvent = (
-    NodeCreated | NodeUpdated | NodeDeleted | EdgeCreated | EdgeUpdated | EdgeDeleted
-)
-
-# Structural events change what exists; position/metadata events change where
-# it is. The two get different durability treatment (PRD §22).
-STRUCTURAL_TYPES = {"node.created", "node.deleted", "edge.created", "edge.deleted"}
 
 
 def outbound(event: BaseModel, *, user_id: uuid.UUID) -> dict:

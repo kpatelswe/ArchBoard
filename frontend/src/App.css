@@ -928,17 +928,34 @@
   white-space: pre-wrap;
 }
 
-.editable--locked {
-  cursor: not-allowed;
-  opacity: 0.75;
+/* ============ editing awareness ============ */
+
+/* "<name> is editing" chip above a node someone else is editing. The
+   accompanying outline is on .node:has(> .editor-tag). Awareness only —
+   nothing is disabled; the CRDT merges concurrent edits. */
+.node {
+  position: relative;
 }
 
-.editable__lock {
-  margin-left: 5px;
+.editor-tag {
+  position: absolute;
+  top: -22px;
+  left: -1px;
+  z-index: 5;
+  padding: 1px 7px;
   font-family: var(--mono);
   font-size: 9.5px;
-  color: var(--warn);
+  font-weight: 500;
   white-space: nowrap;
+  color: #fff;
+  pointer-events: none;
+  background: var(--ok);
+  border-radius: 3px 3px 3px 0;
+}
+
+.node:has(> .editor-tag) {
+  outline: 1.5px dashed var(--ok);
+  outline-offset: 2px;
 }
 
 /* ============ remote cursors ============ */
