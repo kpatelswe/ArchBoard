@@ -645,7 +645,30 @@
   letter-spacing: 0.09em;
   color: var(--kind, var(--ink-faint));
   text-transform: uppercase;
+  white-space: nowrap;
   filter: saturate(0.75) brightness(0.85);
+}
+
+/* implementation tag: quieter than the kind, same mono voice */
+.node__tech {
+  color: var(--ink-soft);
+}
+
+.node__tech-select {
+  max-width: 110px;
+  padding: 0;
+  margin-left: 2px;
+  font: inherit;
+  letter-spacing: inherit;
+  color: var(--ink-soft);
+  text-transform: inherit;
+  cursor: pointer;
+  background: transparent;
+  border: none;
+}
+
+.node__tech-select:hover {
+  color: var(--ink);
 }
 
 /* CAD corner ticks on selection */

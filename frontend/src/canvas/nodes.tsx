@@ -1,12 +1,54 @@
-import { Handle, NodeResizer, Position, type NodeProps } from '@xyflow/react'
+import { Handle, NodeResizer, Position, useReactFlow, type NodeProps } from '@xyflow/react'
 import { CATALOG, type ArchNodeData } from './catalog'
 import { EditableLabel } from './EditableLabel'
 import { KindIcon } from './icons'
+import { useSync } from './SyncContext'
 
 type Props = NodeProps & { data: ArchNodeData }
 
+/** Cosmetic implementation tag (metadata.technology). Shows as part of the
+ *  kind callout; a select while the node is selected. */
+function TechnologyPicker({ id, data, selected }: Props) {
+  const { updateNodeData } = useReactFlow()
+  const emit = useSync()
+  const entry = CATALOG[data.kind]
+  const tech = typeof data.metadata?.technology === 'string' ? data.metadata.technology : ''
+
+  if (!entry.technologies) return null
+  if (!selected) return tech ? <span className="node__tech"> · {tech}</span> : null
+
+  // A remote peer may have set a value outside our suggestion list.
+  const options = tech && !entry.technologies.includes(tech)
+    ? [tech, ...entry.technologies]
+    : entry.technologies
+
+  return (
+    <select
+      className="node__tech-select nodrag"
+      value={tech}
+      onPointerDown={(event) => event.stopPropagation()}
+      onChange={(event) => {
+        const value = event.target.value
+        const metadata = { ...data.metadata }
+        if (value) metadata.technology = value
+        else delete metadata.technology
+        updateNodeData(id, { metadata })
+        emit({ type: 'node.updated', node_id: id, data: { ...data, metadata } })
+      }}
+    >
+      <option value="">· tech?</option>
+      {options.map((name) => (
+        <option key={name} value={name}>
+          · {name}
+        </option>
+      ))}
+    </select>
+  )
+}
+
 /** Every architecture component renders through this one node type. */
-export function ArchitectureNode({ id, data, selected }: Props) {
+export function ArchitectureNode(props: Props) {
+  const { id, data, selected } = props
   const entry = CATALOG[data.kind]
 
   return (
@@ -22,7 +64,10 @@ export function ArchitectureNode({ id, data, selected }: Props) {
         <span className="node__label">
           <EditableLabel id={id} value={data.label} placeholder="Name" />
         </span>
-        <span className="node__kind">{entry.label}</span>
+        <span className="node__kind">
+          {entry.label}
+          <TechnologyPicker {...props} />
+        </span>
       </span>
       <Handle type="source" position={Position.Bottom} />
     </div>
