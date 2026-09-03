@@ -31,11 +31,11 @@ type FigNode = {
 }
 
 const FIG_NODES: FigNode[] = [
-  { kind: 'client', label: 'Browser', x: 24, y: 126 },
-  { kind: 'load_balancer', label: 'Edge LB', tech: 'NGINX', x: 214, y: 126 },
-  { kind: 'api_service', label: 'Core API', tech: 'FastAPI', x: 424, y: 126, selected: true },
-  { kind: 'cache', label: 'Hot cache', tech: 'Redis', x: 606, y: 40 },
-  { kind: 'database', label: 'Primary', tech: 'Postgres', x: 606, y: 212 },
+  { kind: 'client', label: 'Browser', x: 16, y: 126 },
+  { kind: 'load_balancer', label: 'Edge LB', tech: 'NGINX', x: 216, y: 126 },
+  { kind: 'api_service', label: 'Core API', tech: 'FastAPI', x: 416, y: 126, selected: true },
+  { kind: 'cache', label: 'Hot cache', tech: 'Redis', x: 600, y: 40 },
+  { kind: 'database', label: 'Primary', tech: 'Postgres', x: 600, y: 212 },
 ]
 
 /** The hero is a real board: the product's own node cards, wired up, with
@@ -49,10 +49,10 @@ function HeroBoard() {
       </div>
       <div className="fig-stage">
         <svg className="fig-wires" viewBox="0 0 780 300">
-          <path d="M174 149h40" />
-          <path d="M364 149h60" />
-          <path d="M574 149c18 0 14-86 32-86" />
-          <path d="M574 149c18 0 14 86 32 86" />
+          <path d="M176 149h40" />
+          <path d="M376 149h40" />
+          <path d="M576 149c16 0 12-86 24-86" />
+          <path d="M576 149c16 0 12 86 24 86" />
         </svg>
         {FIG_NODES.map((node) => (
           <div
@@ -74,11 +74,11 @@ function HeroBoard() {
         ))}
         <div className="fig-cursor" style={{ left: 556, top: 96, '--c': '#0d9488' } as React.CSSProperties}>
           <svg viewBox="0 0 20 20"><path d="M3 1l7 16 2.5-6.5L19 8z" /></svg>
-          <span>maya</span>
+          <span>Maya</span>
         </div>
         <div className="fig-cursor" style={{ left: 236, top: 196, '--c': '#7c3aed' } as React.CSSProperties}>
           <svg viewBox="0 0 20 20"><path d="M3 1l7 16 2.5-6.5L19 8z" /></svg>
-          <span>sam</span>
+          <span>Sam</span>
         </div>
       </div>
     </div>
@@ -99,8 +99,6 @@ function App() {
 
       <Show when="signed-out">
         <main className="hero">
-          <HeroBoard />
-          <p className="hero__caption">fig. 1 — every design interview, ever</p>
           <h1 className="hero__title">The whiteboard for system design</h1>
           <p className="hero__tagline">
             Sketch architectures with your team in real time, then let the
@@ -114,6 +112,8 @@ function App() {
           <p className="hero__features">
             realtime sync · presence cursors · invite links
           </p>
+          <HeroBoard />
+          <p className="hero__caption">fig. 1 — every design interview, ever</p>
         </main>
       </Show>
 

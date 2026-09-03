@@ -60,6 +60,7 @@
 /* the hero board: a framed slice of the actual product */
 .hero__board {
   overflow: hidden;
+  margin-top: 28px;
   background: var(--surface);
   border: 1px solid var(--line-strong);
   border-radius: var(--radius);
@@ -108,8 +109,8 @@
   display: flex;
   gap: 9px;
   align-items: center;
-  width: 150px;
-  padding: 8px 11px;
+  width: 160px;
+  padding: 8px 10px;
   background: var(--surface);
   border: 1px solid var(--line-strong);
   border-radius: 5px;
@@ -168,11 +169,13 @@
 }
 
 .fig-node__kind {
+  overflow: hidden;
   font-family: var(--mono);
   font-size: 8.5px;
   font-weight: 500;
-  letter-spacing: 0.07em;
+  letter-spacing: 0.05em;
   white-space: nowrap;
+  text-overflow: ellipsis;
   color: var(--kind, var(--ink-faint));
   text-transform: uppercase;
   filter: saturate(0.75) brightness(0.85);
