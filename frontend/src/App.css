@@ -619,14 +619,10 @@
   height: 15px;
 }
 
-/* schematic glyphs: stroke-drawn, inked in the component's hue */
+/* lucide glyphs, inked in the component's hue */
 .kind-icon {
   display: block;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.3;
-  stroke-linecap: round;
-  stroke-linejoin: round;
+  stroke-width: 1.75;
 }
 
 .node__body {
