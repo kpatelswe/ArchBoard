@@ -1,3 +1,4 @@
+import base64
 import uuid
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -27,9 +28,6 @@ MAX_FRAME_BYTES = 64_000
 # published events (already applied locally) from another process's.
 PROCESS_ID = uuid.uuid4().hex
 
-MUTATION_TYPES = events.STRUCTURAL_TYPES | {"node.updated", "edge.updated"}
-
-
 async def _publish(
     board_id: uuid.UUID, payload: dict, *, exclude_connection_id: str | None = None
 ) -> None:
@@ -43,18 +41,23 @@ async def _on_bus_message(board_id: uuid.UUID, message: dict) -> None:
     """Runs on every subscribed process, including the one that published."""
     payload = message["payload"]
 
-    # A mutation from ANOTHER process must be applied to this process's copy
-    # of the board, or its joiners and flushes would use a stale graph. Our
-    # own events were applied before publishing. mark_dirty=False: only the
-    # origin process persists a mutation.
-    if message["origin"] != PROCESS_ID and payload["type"] in MUTATION_TYPES:
-        state = registry.peek(board_id)
-        if state is not None:
-            try:
-                event = events.inbound_adapter.validate_python(payload)
-                state.apply(event, mark_dirty=False)
-            except ValidationError:
-                pass  # a foreign process sent junk; don't crash the reader
+    # CRDT updates ride the JSON bus base64-encoded. An update from ANOTHER
+    # process merges into this process's replica (mark_dirty=False: only the
+    # origin persists); our own updates were applied before publishing.
+    # Either way the raw bytes fan out to local sockets as binary frames.
+    if payload.get("type") == "ydoc.update":
+        update = base64.b64decode(payload["b64"])
+        if message["origin"] != PROCESS_ID:
+            state = registry.peek(board_id)
+            if state is not None:
+                try:
+                    state.apply_update(update, mark_dirty=False)
+                except Exception:
+                    return  # a foreign process sent junk; don't relay it
+        await manager.broadcast_bytes(
+            board_id, update, exclude_connection_id=message.get("exclude")
+        )
+        return
 
     await manager.broadcast(
         board_id, payload, exclude_connection_id=message.get("exclude")
@@ -114,9 +117,11 @@ async def board_websocket(websocket: WebSocket, board_id: uuid.UUID) -> None:
                 "connection_id": connection.connection_id,
                 "role": role,
                 "presence": await presence.roster(board_id),
-                # The live server state may be ahead of what the client
-                # fetched over REST; hand it the truth at join.
-                "snapshot": state.to_snapshot(),
+                # The full CRDT document as one update. The client merges it
+                # into its replica and then sends its own full state back, so
+                # edits made while disconnected survive a reconnect in both
+                # directions — no remount, no snapshot adoption.
+                "ydoc": base64.b64encode(state.encoded_state()).decode(),
                 "version": state.version,
             }
         )
@@ -132,8 +137,12 @@ async def board_websocket(websocket: WebSocket, board_id: uuid.UUID) -> None:
         )
 
         while True:
-            raw = await websocket.receive_text()
-            if len(raw) > MAX_FRAME_BYTES:
+            message = await websocket.receive()
+            if message["type"] == "websocket.disconnect":
+                break
+            update: bytes | None = message.get("bytes")
+            raw: str | None = message.get("text")
+            if len(update or "") > MAX_FRAME_BYTES or len(raw or "") > MAX_FRAME_BYTES:
                 await websocket.send_json(events.error_frame("frame too large"))
                 continue
 
@@ -150,6 +159,32 @@ async def board_websocket(websocket: WebSocket, board_id: uuid.UUID) -> None:
                     await websocket.send_json(
                         events.error_frame("rate limited: slow down")
                     )
+                continue
+
+            # Binary frames are CRDT updates — the entire mutation surface.
+            # The server can gate WHO writes (role, captured at connect) but
+            # no longer inspects WHAT changed: that is the price of merges.
+            if update is not None:
+                if ROLE_RANK[connection.role] < ROLE_RANK[BoardRole.EDITOR]:
+                    await websocket.send_json(
+                        events.error_frame("viewers cannot mutate the board")
+                    )
+                    continue
+                try:
+                    state.apply_update(update)
+                except Exception:
+                    await websocket.send_json(
+                        events.error_frame("malformed CRDT update")
+                    )
+                    continue
+                state.schedule_flush()
+                await _publish(
+                    board_id,
+                    {"type": "ydoc.update", "b64": base64.b64encode(update).decode()},
+                    exclude_connection_id=connection.connection_id,
+                )
+                continue
+            if raw is None:
                 continue
 
             try:
@@ -211,25 +246,10 @@ async def board_websocket(websocket: WebSocket, board_id: uuid.UUID) -> None:
                 )
                 continue
 
-            # Everything else mutates the board: the role captured at connect
-            # gates it with zero database work on the hot path.
-            if ROLE_RANK[connection.role] < ROLE_RANK[BoardRole.EDITOR]:
-                await websocket.send_json(
-                    events.error_frame("viewers cannot mutate the board")
-                )
-                continue
-
-            if not state.apply(event):
-                await websocket.send_json(
-                    events.error_frame(f"{event.type} rejected: stale target")
-                )
-                continue
-
-            state.schedule_flush(structural=event.type in events.STRUCTURAL_TYPES)
-            await _publish(
-                board_id,
-                events.outbound(event, user_id=user_id),
-                exclude_connection_id=connection.connection_id,
+            # Structural mutations no longer travel as JSON — a client that
+            # sends one is out of date with this protocol.
+            await websocket.send_json(
+                events.error_frame("mutations travel as binary CRDT updates")
             )
     except WebSocketDisconnect:
         pass

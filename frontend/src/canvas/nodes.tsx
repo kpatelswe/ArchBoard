@@ -1,8 +1,9 @@
 import { Handle, NodeResizer, NodeToolbar, Position, useReactFlow, type NodeProps } from '@xyflow/react'
+import { setNodeFields } from '../lib/boardDoc'
 import { CATALOG, type ArchNodeData } from './catalog'
 import { EditableLabel } from './EditableLabel'
 import { KindIcon } from './icons'
-import { useSync } from './SyncContext'
+import { useBoardDoc } from './SyncContext'
 
 type Props = NodeProps & { data: ArchNodeData }
 
@@ -15,7 +16,7 @@ function technologyOf(data: ArchNodeData): string {
  *  active chip to clear. */
 function TechnologyMenu({ id, data, selected }: Props) {
   const { updateNodeData } = useReactFlow()
-  const emit = useSync()
+  const doc = useBoardDoc()
   const entry = CATALOG[data.kind]
   const tech = technologyOf(data)
 
@@ -31,7 +32,7 @@ function TechnologyMenu({ id, data, selected }: Props) {
     if (value) metadata.technology = value
     else delete metadata.technology
     updateNodeData(id, { metadata })
-    emit({ type: 'node.updated', node_id: id, data: { ...data, metadata } })
+    if (doc) setNodeFields(doc, id, { data: { ...data, metadata } })
   }
 
   return (

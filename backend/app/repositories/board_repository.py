@@ -34,17 +34,23 @@ async def update_snapshot(
     board_id: uuid.UUID,
     snapshot: dict,
     expected_version: int,
+    ydoc_state: bytes | None = None,
 ) -> Board | None:
     """Compare-and-swap on version. Returns None if another writer won.
 
     The guard is inside the UPDATE, so the check and the write are one
     statement and no lock is needed.
+
+    ydoc_state=None (the REST path) deliberately CLEARS the stored CRDT doc:
+    a JSON save has no CRDT history, so the next live session must re-seed
+    its doc from this snapshot instead of merging against a stale one.
     """
     result = await session.execute(
         update(Board)
         .where(Board.id == board_id, Board.version == expected_version)
         .values(
             current_snapshot=snapshot,
+            ydoc_state=ydoc_state,
             version=Board.version + 1,
             updated_at=func.now(),
         )

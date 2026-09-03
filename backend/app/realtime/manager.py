@@ -64,5 +64,24 @@ class ConnectionManager:
         for connection in dead:
             self.remove(board_id, connection)
 
+    async def broadcast_bytes(
+        self,
+        board_id: uuid.UUID,
+        payload: bytes,
+        *,
+        exclude_connection_id: str | None = None,
+    ) -> None:
+        """Binary twin of broadcast — CRDT updates travel as binary frames."""
+        dead: list[BoardConnection] = []
+        for connection in list(self._boards.get(board_id, ())):
+            if connection.connection_id == exclude_connection_id:
+                continue
+            try:
+                await connection.websocket.send_bytes(payload)
+            except Exception:
+                dead.append(connection)
+        for connection in dead:
+            self.remove(board_id, connection)
+
 
 manager = ConnectionManager()

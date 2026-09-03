@@ -1,12 +1,11 @@
 import { useReactFlow } from '@xyflow/react'
 import { useEffect, useRef, useState } from 'react'
-import { useLocks, useSync } from './SyncContext'
-
-const LOCK_REFRESH_MS = 2_000
+import { setNodeFields } from '../lib/boardDoc'
+import { useBoardDoc } from './SyncContext'
 
 /** Double-click to edit; Escape or blur commits. Enter commits single-line
- *  fields. While editing, an advisory lock is held and refreshed so other
- *  clients see "someone is editing this" instead of colliding. */
+ *  fields. No editing locks: concurrent edits to different fields of a node
+ *  merge via the CRDT, and a label collision resolves last-writer-wins. */
 export function EditableLabel({
   id,
   value,
@@ -19,48 +18,32 @@ export function EditableLabel({
   placeholder?: string
 }) {
   const { updateNodeData, getNode } = useReactFlow()
-  const emit = useSync()
-  const locks = useLocks()
+  const doc = useBoardDoc()
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(value)
   const ref = useRef<HTMLTextAreaElement>(null)
 
-  const heldByOther = !editing && id in locks
-
   useEffect(() => {
-    if (!editing) return
-    ref.current?.focus()
-    emit({ type: 'lock.acquire', node_id: id })
-    const refresh = setInterval(
-      () => emit({ type: 'lock.acquire', node_id: id }),
-      LOCK_REFRESH_MS,
-    )
-    return () => {
-      clearInterval(refresh)
-      emit({ type: 'lock.release', node_id: id })
-    }
-  }, [editing, id, emit])
+    if (editing) ref.current?.focus()
+  }, [editing])
 
   function commit() {
     setEditing(false)
     updateNodeData(id, { label: draft })
     const data = getNode(id)?.data
-    if (data) emit({ type: 'node.updated', node_id: id, data: { ...data, label: draft } })
+    if (data && doc) setNodeFields(doc, id, { data: { ...data, label: draft } })
   }
 
   if (!editing) {
     return (
       <span
-        className={`editable ${heldByOther ? 'editable--locked' : ''}`}
-        title={heldByOther ? `${locks[id].name ?? 'Someone'} is editing…` : undefined}
+        className="editable"
         onDoubleClick={() => {
-          if (heldByOther) return
           setDraft(value)
           setEditing(true)
         }}
       >
         {value || <span className="editable__placeholder">{placeholder}</span>}
-        {heldByOther && <span className="editable__lock">✏ {locks[id].name ?? '…'}</span>}
       </span>
     )
   }

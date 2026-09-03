@@ -1,116 +1,34 @@
 import { useAuth } from '@clerk/react'
-import type { Edge, Node } from '@xyflow/react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { BoardCanvas } from '../canvas/BoardCanvas'
-import { useBoardSocket, type BoardEvent } from '../lib/useBoardSocket'
-import {
-  canonicalize,
-  ConflictError,
-  createInvite,
-  getBoard,
-  saveSnapshot,
-  type Board,
-} from '../lib/api'
-
-type SaveState = 'saved' | 'saving' | 'unsaved' | 'conflict' | 'error'
-
-const DEBOUNCE_MS = 1200
+import { useBoardSocket } from '../lib/useBoardSocket'
+import { createInvite, getBoard, type Board } from '../lib/api'
 
 export function BoardPage() {
   const { boardId } = useParams<{ boardId: string }>()
   const { getToken } = useAuth()
   const [board, setBoard] = useState<Board | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [saveState, setSaveState] = useState<SaveState>('saved')
   const [shareMessage, setShareMessage] = useState<string | null>(null)
   const socket = useBoardSocket(boardId)
-  const { subscribe } = socket
   const socketLive = socket.state === 'live'
 
-  const version = useRef(0)
-  const socketLiveRef = useRef(false)
-
-  // Every (re)connect greeting carries the server's authoritative state.
-  // Adopting it IS the reconnect recovery (PRD §23): replace stale local
-  // state, bump the resync counter so the canvas remounts fresh.
-  const [resyncCount, setResyncCount] = useState(0)
-  useEffect(() => {
-    return subscribe((event: BoardEvent) => {
-      if (event.type === 'connected' && event.snapshot) {
-        version.current = event.version
-        setBoard((current) =>
-          current
-            ? { ...current, current_snapshot: event.snapshot, version: event.version }
-            : current,
-        )
-        setResyncCount((count) => count + 1)
-      }
-    })
-  }, [subscribe])
-  const lastSaved = useRef('')
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-
+  // REST fetch covers the board's metadata (name, role). The graph itself
+  // arrives over the socket as the CRDT document: there is no snapshot
+  // adoption and no remount on reconnect — the server's state MERGES into
+  // the local replica, and unsent local edits merge back the other way.
   useEffect(() => {
     if (!boardId) return
     let cancelled = false
     getToken()
       .then((token) => getBoard(token, boardId))
-      .then((result) => {
-        if (cancelled) return
-        version.current = result.version
-        lastSaved.current = JSON.stringify(
-          canonicalize(
-            result.current_snapshot.nodes ?? [],
-            result.current_snapshot.edges ?? [],
-          ),
-        )
-        setBoard(result)
-      })
+      .then((result) => !cancelled && setBoard(result))
       .catch((err) => !cancelled && setError(String(err)))
     return () => {
       cancelled = true
     }
   }, [boardId, getToken])
-
-  const onGraphChange = useCallback(
-    (nodes: Node[], edges: Edge[]) => {
-      if (!boardId) return
-      if (socketLiveRef.current) return
-
-      // Compare the canonical form so pure selection/drag state never
-      // triggers a write.
-      const next = JSON.stringify(canonicalize(nodes, edges))
-      if (next === lastSaved.current) return
-
-      setSaveState('unsaved')
-      clearTimeout(timer.current)
-      timer.current = setTimeout(async () => {
-        setSaveState('saving')
-        try {
-          const saved = await saveSnapshot(
-            await getToken(),
-            boardId,
-            nodes,
-            edges,
-            version.current,
-          )
-          version.current = saved.version
-          lastSaved.current = next
-          setSaveState('saved')
-        } catch (err) {
-          setSaveState(err instanceof ConflictError ? 'conflict' : 'error')
-        }
-      }, DEBOUNCE_MS)
-    },
-    [boardId, getToken],
-  )
-
-  useEffect(() => {
-    socketLiveRef.current = socketLive
-  }, [socketLive])
-
-  useEffect(() => () => clearTimeout(timer.current), [])
 
   async function onShare(role: 'editor' | 'viewer') {
     if (!boardId) return
@@ -168,14 +86,8 @@ export function BoardPage() {
                 ? 'reconnecting…'
                 : socket.state}
           </span>
-          <span className={`board__save save--${saveState}`}>
-            {readOnly
-              ? 'view only'
-              : socketLive
-                ? 'synced'
-                : saveState === 'conflict'
-                  ? 'reload to continue'
-                  : saveState}
+          <span className="board__save">
+            {readOnly ? 'view only' : socketLive ? 'synced' : 'offline'}
           </span>
           {board.role === 'owner' && (
             <span className="board__share">
@@ -202,13 +114,11 @@ export function BoardPage() {
         </div>
       </div>
       <BoardCanvas
-        key={`sync-${resyncCount}`}
-        initialNodes={board.current_snapshot.nodes ?? []}
-        initialEdges={board.current_snapshot.edges ?? []}
-        onGraphChange={readOnly ? undefined : onGraphChange}
+        doc={socket.doc}
+        docReady={socket.docReady}
         readOnly={readOnly}
         sendEvent={socket.send}
-        subscribe={subscribe}
+        subscribe={socket.subscribe}
         peers={socket.peers}
       />
     </section>

@@ -1,5 +1,7 @@
 import { useAuth } from '@clerk/react'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import * as Y from 'yjs'
+import { base64ToBytes, LOCAL_ORIGIN } from './boardDoc'
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 const WS_URL = API_URL.replace(/^http/, 'ws')
@@ -22,6 +24,37 @@ export function useBoardSocket(boardId: string | undefined) {
   const socketRef = useRef<WebSocket | null>(null)
   const handlersRef = useRef(new Set<(event: BoardEvent) => void>())
 
+  // One CRDT replica per board, outliving reconnects: a reconnect MERGES the
+  // server's state instead of replacing local state, so edits made while
+  // offline survive in both directions.
+  const [doc, setDoc] = useState<Y.Doc | null>(null)
+  const [docReady, setDocReady] = useState(false)
+  const docRef = useRef<Y.Doc | null>(null)
+
+  useEffect(() => {
+    if (!boardId) return
+    const nextDoc = new Y.Doc()
+    docRef.current = nextDoc
+    setDoc(nextDoc)
+    setDocReady(false)
+    // Local transactions go straight to the wire as binary updates.
+    const onUpdate = (update: Uint8Array, origin: unknown) => {
+      if (origin !== LOCAL_ORIGIN) return
+      const socket = socketRef.current
+      // Copy into a fresh exact-length buffer: yjs may hand out a subarray
+      // view, and TS wants a plain ArrayBuffer-backed BufferSource.
+      if (socket?.readyState === WebSocket.OPEN)
+        socket.send(new Uint8Array(update))
+    }
+    nextDoc.on('update', onUpdate)
+    return () => {
+      nextDoc.off('update', onUpdate)
+      nextDoc.destroy()
+      docRef.current = null
+      setDoc(null)
+    }
+  }, [boardId])
+
   useEffect(() => {
     if (!boardId) return
     let cancelled = false
@@ -37,6 +70,7 @@ export function useBoardSocket(boardId: string | undefined) {
       const socket = new WebSocket(
         `${WS_URL}/ws/boards/${boardId}?token=${token}`,
       )
+      socket.binaryType = 'arraybuffer'
       socketRef.current = socket
 
       socket.onopen = () => {
@@ -63,8 +97,24 @@ export function useBoardSocket(boardId: string | undefined) {
       }
 
       socket.onmessage = (raw) => {
+        // Binary frames are collaborators' CRDT updates; merge and rerender.
+        if (raw.data instanceof ArrayBuffer) {
+          const current = docRef.current
+          if (current) Y.applyUpdate(current, new Uint8Array(raw.data), 'remote')
+          return
+        }
         const event: BoardEvent = JSON.parse(raw.data)
-        if (event.type === 'connected') setPeers(event.presence ?? [])
+        if (event.type === 'connected') {
+          setPeers(event.presence ?? [])
+          const current = docRef.current
+          if (current && event.ydoc) {
+            Y.applyUpdate(current, base64ToBytes(event.ydoc), 'server')
+            // Push our full state back: anything drawn while disconnected
+            // merges into the server (idempotent for everything it has).
+            socket.send(new Uint8Array(Y.encodeStateAsUpdate(current)))
+            setDocReady(true)
+          }
+        }
         if (event.type === 'board.joined')
           setPeers((current) =>
             current.some((peer) => peer.user_id === event.user_id)
@@ -115,5 +165,5 @@ export function useBoardSocket(boardId: string | undefined) {
     }
   }, [])
 
-  return { state, peers, send, subscribe }
+  return { state, peers, send, subscribe, doc, docReady }
 }

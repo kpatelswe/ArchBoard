@@ -1,41 +1,38 @@
-"""Authoritative in-memory board state during a live session.
+"""In-memory CRDT board state during a live session.
 
-While anyone is connected, the server applies every validated mutation here
-and persists on its own schedule — clients stop writing snapshots themselves,
-which removes the client-vs-client write race entirely: one writer per board.
+The board is a Yjs document (via pycrdt): two root maps, ``nodes`` and
+``edges``, keyed by id, each value a map of that element's fields. Clients
+hold replicas of the same document; edits travel as binary CRDT updates that
+merge commutatively, so the server no longer arbitrates conflicts — it
+validates *who* may write and persists the merged result.
 
-Durability policy (PRD §22, decided in TODO): structural changes (create /
-delete) flush almost immediately — losing a component someone added is a bug.
-Position changes flush on a debounce — losing two seconds of drag is a shrug.
+Persistence stores two forms side by side: the encoded doc (merge history,
+what live sessions load) and the materialized JSON snapshot (what REST reads
+and the analyzer consume). The version-CAS survives, but a lost race is now
+resolved by *merging* the other writer's doc instead of overwriting it —
+the one concurrency problem CRDTs genuinely erase.
 """
 
 import asyncio
 import uuid
 
-from app.core.db import SessionLocal
-from app.realtime import events
-from app.repositories import board_repository
-from app.schemas.snapshot import BoardSnapshot, PersistedEdge, PersistedNode
+from pycrdt import Doc, Map
+from pydantic import ValidationError
 
-STRUCTURAL_FLUSH_SECONDS = 0.2
-POSITION_FLUSH_SECONDS = 2.0
+from app.core.db import SessionLocal
+from app.repositories import board_repository
+from app.schemas.snapshot import BoardSnapshot
+
+FLUSH_SECONDS = 1.0
 
 
 class BoardState:
-    def __init__(
-        self,
-        board_id: uuid.UUID,
-        nodes: dict[str, PersistedNode],
-        edges: dict[str, PersistedEdge],
-        version: int,
-    ) -> None:
+    def __init__(self, board_id: uuid.UUID, doc: Doc, version: int) -> None:
         self.board_id = board_id
-        self.nodes = nodes
-        self.edges = edges
+        self.doc = doc
         self.version = version
         self._dirty = False
         self._flush_task: asyncio.Task | None = None
-        self._flush_deadline = float("inf")
 
     @classmethod
     async def load(cls, board_id: uuid.UUID) -> "BoardState":
@@ -43,131 +40,102 @@ class BoardState:
             board = await board_repository.get(session, board_id)
         if board is None:
             raise LookupError("board vanished")
-        snapshot = BoardSnapshot.model_validate(board.current_snapshot)
-        return cls(
-            board_id,
-            {node.id: node for node in snapshot.nodes},
-            {edge.id: edge for edge in snapshot.edges},
-            board.version,
-        )
 
-    def to_snapshot(self) -> dict:
-        return BoardSnapshot(
-            nodes=list(self.nodes.values()), edges=list(self.edges.values())
-        ).model_dump(mode="json")
+        doc = Doc()
+        nodes = doc.get("nodes", type=Map)
+        edges = doc.get("edges", type=Map)
+        if board.ydoc_state:
+            doc.apply_update(board.ydoc_state)
+        else:
+            # No CRDT history yet (fresh board, or a REST save cleared it):
+            # seed the doc from the JSON snapshot.
+            snapshot = BoardSnapshot.model_validate(board.current_snapshot)
+            for node in snapshot.nodes:
+                nodes[node.id] = Map(node.model_dump(mode="json", exclude_none=True))
+            for edge in snapshot.edges:
+                edges[edge.id] = Map(edge.model_dump(mode="json", exclude_none=True))
+        return cls(board_id, doc, board.version)
 
-    # -- mutation application ------------------------------------------------
+    def encoded_state(self) -> bytes:
+        """The full document as one update — what joiners and flushes use."""
+        return self.doc.get_update()
 
-    def apply(self, event: events.MutationEvent, *, mark_dirty: bool = True) -> bool:
-        """Apply one validated event. False means it does not fit the current
-        graph (duplicate id, missing target) and must not be broadcast.
+    def apply_update(self, update: bytes, *, mark_dirty: bool = True) -> None:
+        """Merge one binary CRDT update into the document.
 
-        Remote applies (events that another process already owns) pass
-        mark_dirty=False: every process converges its copy, but only the
-        origin process persists, so two processes never race to flush the
-        same mutation."""
-        match event:
-            case events.NodeCreated(node=node):
-                if node.id in self.nodes:
-                    return False
-                self.nodes[node.id] = node
-            case events.NodeUpdated():
-                node = self.nodes.get(event.node_id)
-                if node is None:
-                    return False
-                # model_copy does not re-validate, so patch with the already-
-                # validated model instances, never with dumped dicts.
-                patch = {
-                    field: value
-                    for field in ("position", "data", "width", "height")
-                    if (value := getattr(event, field)) is not None
-                }
-                self.nodes[event.node_id] = node.model_copy(update=patch)
-            case events.NodeDeleted(node_id=node_id):
-                if self.nodes.pop(node_id, None) is None:
-                    return False
-                # A deleted node takes its edges with it, mirroring the
-                # snapshot validator's no-dangling-edges rule.
-                self.edges = {
-                    edge_id: edge
-                    for edge_id, edge in self.edges.items()
-                    if node_id not in (edge.source, edge.target)
-                }
-            case events.EdgeCreated(edge=edge):
-                if edge.id in self.edges:
-                    return False
-                if edge.source not in self.nodes or edge.target not in self.nodes:
-                    return False
-                self.edges[edge.id] = edge
-            case events.EdgeUpdated():
-                edge = self.edges.get(event.edge_id)
-                if edge is None:
-                    return False
-                self.edges[event.edge_id] = edge.model_copy(
-                    update={"data": event.data}
-                )
-            case events.EdgeDeleted(edge_id=edge_id):
-                if self.edges.pop(edge_id, None) is None:
-                    return False
-            case _:
-                return False
+        Remote applies (updates another process already owns) pass
+        mark_dirty=False: every process converges its replica, but only the
+        origin process persists. Raises on bytes that are not a Yjs update.
+        """
+        self.doc.apply_update(update)
         if mark_dirty:
             self._dirty = True
-        return True
+
+    def to_snapshot(self) -> dict:
+        raw = {
+            "nodes": list(self.doc.get("nodes", type=Map).to_py().values()),
+            "edges": list(self.doc.get("edges", type=Map).to_py().values()),
+        }
+        try:
+            return BoardSnapshot.model_validate(raw).model_dump(mode="json")
+        except ValidationError:
+            # The CRDT tradeoff made concrete: updates are opaque, so shape
+            # enforcement happens after merge, not before. Store the raw
+            # materialization rather than dropping user work.
+            return raw
 
     # -- persistence ---------------------------------------------------------
 
-    def schedule_flush(self, *, structural: bool) -> None:
-        delay = STRUCTURAL_FLUSH_SECONDS if structural else POSITION_FLUSH_SECONDS
-        deadline = asyncio.get_running_loop().time() + delay
-        # An earlier deadline replaces a later one; a later one never delays
-        # an already-urgent flush.
+    def schedule_flush(self) -> None:
+        # One debounce for everything: a binary update does not say whether
+        # it moved a node or created one, so the structural/position split
+        # from the intent protocol is gone. Worst case loses ~1s on a crash.
         if self._flush_task is not None and not self._flush_task.done():
-            if deadline >= self._flush_deadline:
-                return
-            self._flush_task.cancel()
-        self._flush_deadline = deadline
-        self._flush_task = asyncio.create_task(self._flush_after(delay))
+            return
+        self._flush_task = asyncio.create_task(self._flush_after(FLUSH_SECONDS))
 
     async def _flush_after(self, delay: float) -> None:
         try:
             await asyncio.sleep(delay)
         except asyncio.CancelledError:
             return
-        self._flush_deadline = float("inf")
         await self.flush()
 
     async def flush(self) -> None:
         if not self._dirty:
             return
         self._dirty = False
-        snapshot = self.to_snapshot()
         async with SessionLocal() as session:
             saved = await board_repository.update_snapshot(
                 session,
                 board_id=self.board_id,
-                snapshot=snapshot,
+                snapshot=self.to_snapshot(),
                 expected_version=self.version,
+                ydoc_state=self.encoded_state(),
             )
             if saved is not None:
                 self.version = saved.version
                 return
-            # A REST save (stale tab) bumped the version underneath us. The
-            # live session is authoritative while people are connected, so
-            # adopt the new version number and write the live state over it.
+            # Another writer bumped the version (a REST save, or another
+            # process's flush). Merge their document into ours — CRDT merge
+            # is exactly the operation that makes this race harmless — and
+            # write the union over their version.
             board = await board_repository.get(session, self.board_id)
             if board is None:
                 return
+            if board.ydoc_state:
+                self.doc.apply_update(board.ydoc_state)
             saved = await board_repository.update_snapshot(
                 session,
                 board_id=self.board_id,
-                snapshot=snapshot,
+                snapshot=self.to_snapshot(),
                 expected_version=board.version,
+                ydoc_state=self.encoded_state(),
             )
             if saved is not None:
                 self.version = saved.version
             else:
-                self._dirty = True  # lost twice; the next event retries
+                self._dirty = True  # lost twice; the next update retries
 
 
 class BoardStateRegistry:

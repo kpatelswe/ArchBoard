@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Uuid, func, text
+from sqlalchemy import DateTime, ForeignKey, Integer, LargeBinary, String, Uuid, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -28,6 +28,12 @@ class Board(Base):
     # Incremented on every snapshot write; clients send the version they read so
     # a concurrent save is rejected rather than silently overwriting.
     version: Mapped[int] = mapped_column(Integer, server_default=text("1"))
+
+    # Encoded Yjs CRDT document — the merge-authoritative form of the board.
+    # current_snapshot stays the materialized JSON view (REST reads, analyzer).
+    # NULL means "no CRDT history yet": the next live session seeds a fresh
+    # doc from current_snapshot (a REST save clears it for the same reason).
+    ydoc_state: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
