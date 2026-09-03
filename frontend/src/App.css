@@ -57,43 +57,171 @@
   text-align: center;
 }
 
-.hero__fig {
-  width: min(460px, 90vw);
-  margin-bottom: 4px;
+/* the hero board: a framed slice of the actual product */
+.hero__board {
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
 }
 
-.fig__box rect {
-  fill: var(--surface);
-  stroke: var(--ink);
-  stroke-width: 1.4;
-}
-
-.fig__box text {
+.fig-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
   font-family: var(--mono);
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  fill: var(--ink-soft);
-  text-anchor: middle;
+  font-size: 10.5px;
+  color: var(--ink-soft);
+  border-bottom: 1px solid var(--line);
 }
 
-.fig__box--signal rect {
-  stroke: var(--signal);
+.fig-bar__live {
+  color: var(--ok);
 }
 
-.fig__box--signal text {
-  fill: var(--signal-ink);
+.fig-stage {
+  position: relative;
+  width: 780px;
+  height: 300px;
+  background-image: radial-gradient(var(--line-strong) 1px, transparent 1px);
+  background-size: 22px 22px;
+  background-position: 11px 11px;
 }
 
-.fig__wire {
+.fig-wires {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.fig-wires path {
   fill: none;
-  stroke: var(--line-strong);
+  stroke: var(--ink-faint);
   stroke-width: 1.4;
+}
+
+.fig-node {
+  position: absolute;
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  width: 150px;
+  padding: 8px 11px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+  box-shadow: var(--shadow-s);
+}
+
+.fig-node.is-selected {
+  border-color: var(--signal);
+}
+
+.fig-node.is-selected::after {
+  position: absolute;
+  inset: -6px;
+  content: '';
+  background:
+    linear-gradient(var(--signal), var(--signal)) left 0 top 0 / 9px 1.5px,
+    linear-gradient(var(--signal), var(--signal)) left 0 top 0 / 1.5px 9px,
+    linear-gradient(var(--signal), var(--signal)) right 0 top 0 / 9px 1.5px,
+    linear-gradient(var(--signal), var(--signal)) right 0 top 0 / 1.5px 9px,
+    linear-gradient(var(--signal), var(--signal)) left 0 bottom 0 / 9px 1.5px,
+    linear-gradient(var(--signal), var(--signal)) left 0 bottom 0 / 1.5px 9px,
+    linear-gradient(var(--signal), var(--signal)) right 0 bottom 0 / 9px 1.5px,
+    linear-gradient(var(--signal), var(--signal)) right 0 bottom 0 / 1.5px 9px;
+  background-repeat: no-repeat;
+}
+
+.fig-node__icon {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  color: color-mix(in oklab, var(--kind, var(--ink-soft)) 80%, var(--ink));
+  background: var(--paper);
+  border: 1px solid color-mix(in oklab, var(--kind, var(--line)) 50%, var(--line));
+  border-radius: var(--radius-s);
+}
+
+.fig-node__icon .kind-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.fig-node__body {
+  display: grid;
+  min-width: 0;
+  text-align: left;
+}
+
+.fig-node__label {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.fig-node__kind {
+  font-family: var(--mono);
+  font-size: 8.5px;
+  font-weight: 500;
+  letter-spacing: 0.07em;
+  white-space: nowrap;
+  color: var(--kind, var(--ink-faint));
+  text-transform: uppercase;
+  filter: saturate(0.75) brightness(0.85);
+}
+
+.fig-cursor {
+  position: absolute;
+  display: flex;
+  gap: 2px;
+  align-items: flex-start;
+  color: var(--c);
+}
+
+.fig-cursor svg {
+  width: 15px;
+  height: 15px;
+  fill: currentColor;
+}
+
+.fig-cursor span {
+  padding: 1px 6px;
+  margin-top: 10px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: #fff;
+  background: var(--c);
+  border-radius: 3px;
 }
 
 .hero__caption {
+  margin-top: 10px;
   font-family: var(--mono);
   font-size: 11.5px;
   color: var(--ink-faint);
+}
+
+.hero__features {
+  margin-top: 14px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--ink-faint);
+}
+
+@media (max-width: 860px) {
+  .hero__board {
+    transform: scale(0.62);
+    margin-block: -60px;
+  }
 }
 
 .hero__title {

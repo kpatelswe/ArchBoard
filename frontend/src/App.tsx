@@ -1,5 +1,7 @@
 import { Show, SignInButton, UserButton } from '@clerk/react'
 import { Link, Route, Routes } from 'react-router-dom'
+import { CATALOG, type NodeKind } from './canvas/catalog'
+import { KindIcon } from './canvas/icons'
 import { BoardPage } from './pages/BoardPage'
 import { BoardsPage } from './pages/BoardsPage'
 import { InvitePage } from './pages/InvitePage'
@@ -19,34 +21,67 @@ function Wordmark() {
   )
 }
 
-function HeroSchematic() {
+type FigNode = {
+  kind: NodeKind
+  label: string
+  tech?: string
+  x: number
+  y: number
+  selected?: boolean
+}
+
+const FIG_NODES: FigNode[] = [
+  { kind: 'client', label: 'Browser', x: 24, y: 126 },
+  { kind: 'load_balancer', label: 'Edge LB', tech: 'NGINX', x: 214, y: 126 },
+  { kind: 'api_service', label: 'Core API', tech: 'FastAPI', x: 424, y: 126, selected: true },
+  { kind: 'cache', label: 'Hot cache', tech: 'Redis', x: 606, y: 40 },
+  { kind: 'database', label: 'Primary', tech: 'Postgres', x: 606, y: 212 },
+]
+
+/** The hero is a real board: the product's own node cards, wired up, with
+ *  collaborators' cursors on it. */
+function HeroBoard() {
   return (
-    <svg className="hero__fig" viewBox="0 0 460 96" aria-hidden="true">
-      <g className="fig__box">
-        <rect x="2" y="30" width="88" height="36" rx="3" />
-        <text x="46" y="52">CLIENT</text>
-      </g>
-      <path className="fig__wire" d="M90 48h40" />
-      <g className="fig__box">
-        <rect x="132" y="30" width="72" height="36" rx="3" />
-        <text x="168" y="52">LB</text>
-      </g>
-      <path className="fig__wire" d="M204 48h40" />
-      <g className="fig__box fig__box--signal">
-        <rect x="246" y="30" width="82" height="36" rx="3" />
-        <text x="287" y="52">API</text>
-      </g>
-      <path className="fig__wire" d="M328 48c20 0 20-28 40-28" />
-      <path className="fig__wire" d="M328 48c20 0 20 28 40 28" />
-      <g className="fig__box">
-        <rect x="370" y="2" width="88" height="36" rx="3" />
-        <text x="414" y="24">CACHE</text>
-      </g>
-      <g className="fig__box">
-        <rect x="370" y="58" width="88" height="36" rx="3" />
-        <text x="414" y="80">DB</text>
-      </g>
-    </svg>
+    <div className="hero__board" aria-hidden="true">
+      <div className="fig-bar">
+        <span>boards / interview-prep</span>
+        <span className="fig-bar__live">● 3 online · synced</span>
+      </div>
+      <div className="fig-stage">
+        <svg className="fig-wires" viewBox="0 0 780 300">
+          <path d="M174 149h40" />
+          <path d="M364 149h60" />
+          <path d="M574 149c18 0 14-86 32-86" />
+          <path d="M574 149c18 0 14 86 32 86" />
+        </svg>
+        {FIG_NODES.map((node) => (
+          <div
+            key={node.kind}
+            className={`fig-node ${node.selected ? 'is-selected' : ''}`}
+            style={{ left: node.x, top: node.y, '--kind': CATALOG[node.kind].accent } as React.CSSProperties}
+          >
+            <span className="fig-node__icon">
+              <KindIcon kind={node.kind} />
+            </span>
+            <span className="fig-node__body">
+              <span className="fig-node__label">{node.label}</span>
+              <span className="fig-node__kind">
+                {CATALOG[node.kind].label}
+                {node.tech && ` · ${node.tech}`}
+              </span>
+            </span>
+          </div>
+        ))}
+        <div className="fig-cursor" style={{ left: 556, top: 96, '--c': '#0d9488' } as React.CSSProperties}>
+          <svg viewBox="0 0 20 20"><path d="M3 1l7 16 2.5-6.5L19 8z" /></svg>
+          <span>maya</span>
+        </div>
+        <div className="fig-cursor" style={{ left: 236, top: 196, '--c': '#7c3aed' } as React.CSSProperties}>
+          <svg viewBox="0 0 20 20"><path d="M3 1l7 16 2.5-6.5L19 8z" /></svg>
+          <span>sam</span>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -64,8 +99,8 @@ function App() {
 
       <Show when="signed-out">
         <main className="hero">
-          <HeroSchematic />
-          <p className="hero__caption">fig. 1 — drawn together, live</p>
+          <HeroBoard />
+          <p className="hero__caption">fig. 1 — every design interview, ever</p>
           <h1 className="hero__title">The whiteboard for system design</h1>
           <p className="hero__tagline">
             Sketch architectures with your team in real time, then let the
@@ -76,6 +111,9 @@ function App() {
               Continue with Google
             </button>
           </SignInButton>
+          <p className="hero__features">
+            realtime sync · presence cursors · invite links
+          </p>
         </main>
       </Show>
 
