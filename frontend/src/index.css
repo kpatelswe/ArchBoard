@@ -1,33 +1,32 @@
-/* Design tokens + reset. App-specific styles live in App.css. */
+/* Drafting-instrument tokens. App styles live in App.css. */
 
 :root {
-  --bg: #f6f7f9;
+  --paper: #fafaf7;
+  --paper-2: #f2f1ec;
   --surface: #ffffff;
-  --surface-2: #f1f2f5;
-  --border: #e4e6ea;
-  --border-strong: #d3d6dc;
+  --line: #e2e1db;
+  --line-strong: #c9c8c0;
 
-  --text: #1a1d23;
-  --text-soft: #5c6370;
-  --text-faint: #9aa1ac;
+  --ink: #17191b;
+  --ink-soft: #5f6368;
+  --ink-faint: #9a9c98;
 
-  --accent: #4f63ff;
-  --accent-strong: #3b4de0;
-  --accent-soft: #eef0ff;
+  --signal: #e8590c;
+  --signal-ink: #c74a08;
+  --signal-wash: #fdeee4;
 
-  --ok: #16a34a;
-  --warn: #d97706;
-  --danger: #dc2626;
+  --ok: #2f7d43;
+  --warn: #b45309;
+  --danger: #c92a2a;
 
-  --radius-s: 6px;
-  --radius: 10px;
-  --radius-l: 14px;
+  --radius-s: 4px;
+  --radius: 8px;
 
-  --shadow-s: 0 1px 2px rgb(16 20 28 / 0.05);
-  --shadow: 0 1px 3px rgb(16 20 28 / 0.06), 0 4px 16px rgb(16 20 28 / 0.06);
-  --shadow-pop: 0 4px 12px rgb(16 20 28 / 0.1), 0 12px 32px rgb(16 20 28 / 0.12);
+  --shadow-s: 0 1px 2px rgb(23 25 27 / 0.05);
+  --shadow: 0 2px 6px rgb(23 25 27 / 0.07), 0 8px 24px rgb(23 25 27 / 0.05);
 
-  --font: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+  --mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
 }
 
 * {
@@ -43,9 +42,8 @@ body,
 body {
   margin: 0;
   font: 14px/1.5 var(--font);
-  letter-spacing: -0.006em;
-  color: var(--text);
-  background: var(--bg);
+  color: var(--ink);
+  background: var(--paper);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
@@ -55,7 +53,7 @@ h2,
 h3 {
   margin: 0;
   font-weight: 600;
-  color: var(--text);
+  color: var(--ink);
 }
 
 p {
@@ -68,6 +66,20 @@ button {
 }
 
 a {
-  color: var(--accent-strong);
+  color: var(--signal-ink);
   text-decoration: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
 }

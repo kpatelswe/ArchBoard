@@ -13,7 +13,10 @@ function PaletteItem({ kind }: { kind: NodeKind }) {
         event.dataTransfer.effectAllowed = 'move'
       }}
     >
-      <span className="palette__icon" style={{ background: entry.accent }}>
+      <span
+        className="palette__icon"
+        style={{ '--kind': entry.accent } as React.CSSProperties}
+      >
         {entry.icon}
       </span>
       {entry.label}

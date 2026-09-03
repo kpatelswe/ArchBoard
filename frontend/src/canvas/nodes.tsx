@@ -11,12 +11,10 @@ export function ArchitectureNode({ id, data, selected }: Props) {
   return (
     <div
       className={`node node--arch ${selected ? 'is-selected' : ''}`}
-      style={{ borderColor: entry.accent }}
+      style={{ '--kind': entry.accent } as React.CSSProperties}
     >
       <Handle type="target" position={Position.Top} />
-      <span className="node__icon" style={{ background: entry.accent }}>
-        {entry.icon}
-      </span>
+      <span className="node__icon">{entry.icon}</span>
       <span className="node__body">
         <span className="node__label">
           <EditableLabel id={id} value={data.label} placeholder="Name" />
