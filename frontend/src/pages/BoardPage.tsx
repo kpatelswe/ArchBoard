@@ -129,57 +129,77 @@ export function BoardPage() {
   return (
     <section className="board">
       <div className="board__bar">
-        <Link to="/">← Boards</Link>
-        <strong>{board.name}</strong>
-        <span className="board__role">{board.role}</span>
-        <span className={`board__live board__live--${socket.state}`}>
-          {socket.state === 'live'
-            ? `● ${socket.peers.length} online`
-            : socket.state === 'reconnecting'
-              ? 'reconnecting…'
-              : socket.state}
-        </span>
-        <span className="board__peers">
-          {socket.peers.map((peer) =>
-            peer.avatar_url ? (
-              <img
-                key={peer.user_id}
-                className="peer-chip"
-                src={peer.avatar_url}
-                alt={peer.name ?? 'collaborator'}
-                title={peer.name ?? undefined}
-              />
-            ) : (
-              <span key={peer.user_id} className="peer-chip peer-chip--initial" title={peer.name ?? undefined}>
-                {(peer.name ?? '?').slice(0, 1)}
-              </span>
-            ),
-          )}
-        </span>
-        {board.role === 'owner' && (
-          <span className="board__share">
-            {shareMessage ?? (
-              <>
-                Share:{' '}
-                <button type="button" onClick={() => onShare('editor')}>
-                  editor
-                </button>{' '}
-                <button type="button" onClick={() => onShare('viewer')}>
-                  viewer
-                </button>
-              </>
+        <div className="board__bar-group">
+          <Link to="/" className="board__back" title="All boards">
+            ←
+          </Link>
+          <strong className="board__name">{board.name}</strong>
+          <span className={`pill pill--${board.role ?? 'viewer'}`}>
+            {board.role}
+          </span>
+        </div>
+
+        <div className="board__bar-group">
+          <span className="board__peers">
+            {socket.peers.map((peer) =>
+              peer.avatar_url ? (
+                <img
+                  key={peer.user_id}
+                  className="peer-chip"
+                  src={peer.avatar_url}
+                  alt={peer.name ?? 'collaborator'}
+                  title={peer.name ?? undefined}
+                />
+              ) : (
+                <span
+                  key={peer.user_id}
+                  className="peer-chip peer-chip--initial"
+                  title={peer.name ?? undefined}
+                >
+                  {(peer.name ?? '?').slice(0, 1)}
+                </span>
+              ),
             )}
           </span>
-        )}
-        <span className={`board__meta save--${saveState}`}>
-          {readOnly
-            ? 'view only'
-            : socketLive
-              ? 'synced live'
-              : saveState === 'conflict'
-              ? 'Someone else saved — reload to continue'
-              : saveState}
-        </span>
+          <span className={`board__live board__live--${socket.state}`}>
+            {socket.state === 'live'
+              ? `${socket.peers.length} online`
+              : socket.state === 'reconnecting'
+                ? 'reconnecting…'
+                : socket.state}
+          </span>
+          <span className={`board__save save--${saveState}`}>
+            {readOnly
+              ? 'view only'
+              : socketLive
+                ? 'synced'
+                : saveState === 'conflict'
+                  ? 'reload to continue'
+                  : saveState}
+          </span>
+          {board.role === 'owner' && (
+            <span className="board__share">
+              {shareMessage ?? (
+                <>
+                  <button
+                    className="btn btn--small"
+                    type="button"
+                    onClick={() => onShare('viewer')}
+                  >
+                    Share view
+                  </button>
+                  <button
+                    className="btn btn--small btn--primary"
+                    type="button"
+                    onClick={() => onShare('editor')}
+                  >
+                    Share edit
+                  </button>
+                </>
+              )}
+            </span>
+          )}
+        </div>
       </div>
       <BoardCanvas
         key={`sync-${resyncCount}`}

@@ -7,25 +7,29 @@ import './App.css'
 
 function App() {
   return (
-    <main className="shell">
-      <header className="bar">
-        <div>
-          <h1>
-            <Link to="/">ArchBoard</Link>
-          </h1>
-          <p className="tagline">Collaborative system design board</p>
-        </div>
+    <div className="app">
+      <header className="nav">
+        <Link to="/" className="nav__brand">
+          <span className="nav__mark">▦</span> ArchBoard
+        </Link>
         <Show when="signed-in">
           <UserButton />
         </Show>
       </header>
 
       <Show when="signed-out">
-        <SignInButton mode="modal">
-          <button className="primary" type="button">
-            Sign in
-          </button>
-        </SignInButton>
+        <main className="hero">
+          <span className="hero__mark">▦</span>
+          <h1 className="hero__title">ArchBoard</h1>
+          <p className="hero__tagline">
+            Sketch system architectures together, in real time.
+          </p>
+          <SignInButton mode="modal">
+            <button className="btn btn--primary btn--lg" type="button">
+              Continue with Google
+            </button>
+          </SignInButton>
+        </main>
       </Show>
 
       <Show when="signed-in">
@@ -35,7 +39,7 @@ function App() {
           <Route path="/invite/:inviteToken" element={<InvitePage />} />
         </Routes>
       </Show>
-    </main>
+    </div>
   )
 }
 
