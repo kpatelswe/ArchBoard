@@ -1,6 +1,7 @@
 import { Handle, NodeResizer, Position, type NodeProps } from '@xyflow/react'
 import { CATALOG, type ArchNodeData } from './catalog'
 import { EditableLabel } from './EditableLabel'
+import { KindIcon } from './icons'
 
 type Props = NodeProps & { data: ArchNodeData }
 
@@ -14,7 +15,9 @@ export function ArchitectureNode({ id, data, selected }: Props) {
       style={{ '--kind': entry.accent } as React.CSSProperties}
     >
       <Handle type="target" position={Position.Top} />
-      <span className="node__icon">{entry.icon}</span>
+      <span className="node__icon">
+        <KindIcon kind={data.kind} />
+      </span>
       <span className="node__body">
         <span className="node__label">
           <EditableLabel id={id} value={data.label} placeholder="Name" />

@@ -1,4 +1,5 @@
 import { ANNOTATION_KINDS, CATALOG, COMPONENT_KINDS, type NodeKind } from './catalog'
+import { KindIcon } from './icons'
 
 function PaletteItem({ kind }: { kind: NodeKind }) {
   const entry = CATALOG[kind]
@@ -17,7 +18,7 @@ function PaletteItem({ kind }: { kind: NodeKind }) {
         className="palette__icon"
         style={{ '--kind': entry.accent } as React.CSSProperties}
       >
-        {entry.icon}
+        <KindIcon kind={kind} />
       </span>
       {entry.label}
     </button>
