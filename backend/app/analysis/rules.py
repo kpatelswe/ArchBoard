@@ -1,4 +1,4 @@
-"""The design linter: nine deterministic rules over a BoardGraph.
+"""The design linter: eight deterministic rules over a BoardGraph.
 
 Every rule is a pure function `(graph, traffic_rps) -> list[Finding]` — no
 database, no network, no randomness, so the same board always lints the same
@@ -202,39 +202,6 @@ def deep_sync_chain(graph: BoardGraph, traffic_rps: float | None) -> list[Findin
     ]
 
 
-# -- 4. missing timeouts (one aggregated finding) ----------------------------
-
-
-def missing_timeouts(graph: BoardGraph, traffic_rps: float | None) -> list[Finding]:
-    bare = [edge for edge in graph.edges if edge.synchronous and edge.timeout_ms is None]
-    if not bare:
-        return []
-    total_sync = sum(1 for edge in graph.edges if edge.synchronous)
-    return [
-        Finding(
-            rule="missing_timeouts",
-            severity="warning",
-            message=(
-                f"{len(bare)} of {total_sync} synchronous edges declare no timeout"
-            ),
-            why=(
-                "A sync call with no timeout inherits its dependency's worst "
-                "day: one slow downstream fills every upstream thread pool and "
-                "the outage travels toward the client."
-            ),
-            mitigation=(
-                "Set a timeout on every synchronous edge (select it and add "
-                "timeout_ms), sized to the caller's latency budget."
-            ),
-            when_its_fine=(
-                "Sketch-stage diagrams — but decide the budgets before anyone "
-                "builds from this."
-            ),
-            edge_ids=[edge.id for edge in bare],
-        )
-    ]
-
-
 # -- 5. queue without failure handling ---------------------------------------
 
 
@@ -416,7 +383,6 @@ ALL_RULES: list[Rule] = [
     single_point_of_failure,
     sync_fanout,
     deep_sync_chain,
-    missing_timeouts,
     queue_failure_handling,
     orphan_nodes,
     no_persistent_store,

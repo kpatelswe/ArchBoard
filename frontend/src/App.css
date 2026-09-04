@@ -918,15 +918,18 @@
   text-overflow: ellipsis;
 }
 
-/* the kind callout — mono, in the component's hue */
+/* the kind callout — mono, in the component's hue. Persisted nodes carry a
+   fixed width, so a long callout must truncate, never escape the border. */
 .node__kind {
+  overflow: hidden;
   font-family: var(--mono);
   font-size: 9.5px;
   font-weight: 500;
   letter-spacing: 0.09em;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   color: var(--kind, var(--ink-faint));
   text-transform: uppercase;
-  white-space: nowrap;
   filter: saturate(0.75) brightness(0.85);
 }
 
