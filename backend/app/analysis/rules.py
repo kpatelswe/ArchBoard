@@ -235,8 +235,9 @@ def queue_failure_handling(
                         "the broker."
                     ),
                     mitigation=(
-                        "Add a dead-letter queue and an alert on it (mark this "
-                        "queue's dead_letter flag once designed)."
+                        "Add a dead-letter queue and an alert on it, then "
+                        "select this queue and toggle its DLQ chip to record "
+                        "the decision."
                     ),
                     when_its_fine=(
                         "Fire-and-forget work where losing a poisoned message "

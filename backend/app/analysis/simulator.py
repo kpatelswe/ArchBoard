@@ -40,6 +40,39 @@ DEFAULT_CAPACITY_RPS: dict[NodeKind, float] = {
     NodeKind.EXTERNAL_API: 1_000,
 }
 
+# The provider tag (metadata.technology) refines the kind ballpark: DynamoDB
+# is not Postgres, and Stripe will rate-limit you long before 1k RPS. Keys
+# are lowercase; values beat the kind default, and an explicit capacity_rps
+# on the node beats both.
+TECHNOLOGY_CAPACITY_RPS: dict[str, float] = {
+    # databases
+    "postgresql": 1_000, "mysql": 1_000, "sqlite": 300,
+    "mongodb": 2_000, "cassandra": 5_000, "dynamodb": 10_000,
+    # caches / redis
+    "redis": 30_000, "valkey": 30_000, "elasticache": 30_000,
+    "upstash": 10_000, "memcached": 50_000, "in-process": 100_000,
+    # queues
+    "rabbitmq": 10_000, "kafka": 50_000, "sqs": 20_000,
+    "redis streams": 20_000, "pub/sub": 50_000,
+    # load balancers / cdn
+    "nginx": 20_000, "haproxy": 25_000, "aws alb": 50_000,
+    "envoy": 20_000, "traefik": 15_000,
+    "cloudfront": 100_000, "cloudflare": 100_000, "fastly": 100_000,
+    "akamai": 100_000,
+    # api frameworks
+    "fastapi": 2_000, "express": 2_000, "spring boot": 3_000,
+    "go": 8_000, "rails": 800, "django": 1_000, "node.js": 2_000,
+    "grpc": 5_000,
+    # workers
+    "celery": 500, "sidekiq": 800, "bullmq": 800, "aws lambda": 5_000,
+    # search
+    "elasticsearch": 1_500, "opensearch": 1_500, "algolia": 5_000,
+    "meilisearch": 1_000, "typesense": 1_500,
+    # external APIs: third parties rate-limit hard
+    "stripe": 100, "twilio": 100, "sendgrid": 500, "auth0": 500,
+    "openai": 50,
+}
+
 DEFAULT_HIT_RATE = 0.8
 
 
@@ -65,6 +98,11 @@ def _capacity(node: GraphNode) -> float | None:
     override = node.metadata.get("capacity_rps")
     if isinstance(override, (int, float)) and not isinstance(override, bool) and override > 0:
         return float(override)
+    technology = node.metadata.get("technology")
+    if isinstance(technology, str):
+        by_tech = TECHNOLOGY_CAPACITY_RPS.get(technology.strip().lower())
+        if by_tech is not None:
+            return by_tech
     return DEFAULT_CAPACITY_RPS.get(node.kind)
 
 

@@ -18,14 +18,16 @@ function technologyOf(data: ArchNodeData): string {
   return typeof data.metadata?.technology === 'string' ? data.metadata.technology : ''
 }
 
-/** Cosmetic implementation tag (metadata.technology). While the node is
- *  selected, a chip menu floats below it; click a chip to set, click the
- *  active chip to clear. */
+/** Node properties (metadata.technology, and dead_letter for queues). While
+ *  the node is selected, a chip menu floats below it; click a chip to set,
+ *  click the active chip to clear. The provider also tunes the simulator's
+ *  capacity assumption for this node. */
 function TechnologyMenu({ id, data, selected }: Props) {
   const { updateNodeData } = useReactFlow()
   const doc = useBoardDoc()
   const entry = CATALOG[data.kind]
   const tech = technologyOf(data)
+  const hasDlq = data.metadata?.dead_letter === true
 
   if (!entry.technologies) return null
 
@@ -34,12 +36,18 @@ function TechnologyMenu({ id, data, selected }: Props) {
     ? [tech, ...entry.technologies]
     : entry.technologies
 
-  function setTechnology(value: string) {
+  function patchMetadata(patch: (metadata: Record<string, unknown>) => void) {
     const metadata = { ...data.metadata }
-    if (value) metadata.technology = value
-    else delete metadata.technology
+    patch(metadata)
     updateNodeData(id, { metadata })
     if (doc) setNodeFields(doc, id, { data: { ...data, metadata } })
+  }
+
+  function setTechnology(value: string) {
+    patchMetadata((metadata) => {
+      if (value) metadata.technology = value
+      else delete metadata.technology
+    })
   }
 
   return (
@@ -55,6 +63,24 @@ function TechnologyMenu({ id, data, selected }: Props) {
           {name}
         </button>
       ))}
+      {data.kind === 'queue' && (
+        <>
+          <span className="tech-menu__label tech-menu__label--split">DLQ</span>
+          <button
+            type="button"
+            className={`tech-menu__chip ${hasDlq ? 'is-active' : ''}`}
+            title="This queue has dead-letter handling"
+            onClick={() =>
+              patchMetadata((metadata) => {
+                if (hasDlq) delete metadata.dead_letter
+                else metadata.dead_letter = true
+              })
+            }
+          >
+            {hasDlq ? 'handled ✓' : 'none'}
+          </button>
+        </>
+      )}
     </NodeToolbar>
   )
 }

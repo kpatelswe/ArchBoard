@@ -960,6 +960,12 @@
   text-transform: uppercase;
 }
 
+.tech-menu__label--split {
+  padding-left: 8px;
+  margin-left: 5px;
+  border-left: 1px solid var(--line);
+}
+
 .tech-menu__chip {
   padding: 3px 8px;
   font-family: var(--mono);
