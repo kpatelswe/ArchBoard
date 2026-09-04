@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 190" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">
+  <rect width="800" height="190" rx="10" fill="#fafaf7"/>
+  <rect x="0.5" y="0.5" width="799" height="189" rx="10" fill="none" stroke="#c9c8c0"/>
+  <g fill="#c9c8c0">
+    <circle cx="40" cy="40" r="1.2"/><circle cx="80" cy="40" r="1.2"/><circle cx="120" cy="40" r="1.2"/><circle cx="40" cy="80" r="1.2"/><circle cx="40" cy="120" r="1.2"/><circle cx="40" cy="160" r="1.2"/><circle cx="80" cy="160" r="1.2"/><circle cx="760" cy="40" r="1.2"/><circle cx="720" cy="40" r="1.2"/><circle cx="760" cy="80" r="1.2"/><circle cx="760" cy="120" r="1.2"/><circle cx="760" cy="160" r="1.2"/><circle cx="720" cy="160" r="1.2"/>
+  </g>
+  <g fill="none" stroke="#17191b" stroke-width="2" stroke-linejoin="round">
+    <rect x="228" y="62" width="30" height="22" rx="3"/>
+    <rect x="228" y="110" width="30" height="22" rx="3"/>
+    <path d="M258 73h22v14M258 121h22v-13" stroke-linecap="round"/>
+    <rect x="280" y="87" width="30" height="22" rx="3" stroke="#e8590c"/>
+  </g>
+  <text x="338" y="105" font-size="34" font-weight="600" letter-spacing="3" fill="#17191b">ARCH<tspan fill="#e8590c">/</tspan>BOARD</text>
+  <text x="340" y="132" font-size="13" fill="#5f6368">the whiteboard for system design</text>
+</svg>
