@@ -208,9 +208,39 @@ def deep_sync_chain(graph: BoardGraph, traffic_rps: float | None) -> list[Findin
 def queue_failure_handling(
     graph: BoardGraph, traffic_rps: float | None
 ) -> list[Finding]:
+    """Dead-letter handling is read from the TOPOLOGY, not a flag: if the
+    design has a DLQ, it should be an actual queue on the board, wired in.
+    A queue "has" dead-letter handling when it (or one of its consumers)
+    routes onward to a different queue; a queue in that DLQ position is
+    itself exempt — its consumer is usually a human with an alert."""
+    queues = {node.id for node in graph.of_kind(NodeKind.QUEUE)}
+
+    def routes_to_a_queue(node_id: str, *, ignoring: str) -> bool:
+        return any(
+            edge.target in queues and edge.target != ignoring
+            for edge in graph.out_edges[node_id]
+        )
+
+    def is_dlq(queue_id: str) -> bool:
+        # Fed by another queue directly, or by a worker that drains one.
+        for edge in graph.in_edges[queue_id]:
+            feeder = graph.nodes[edge.source]
+            if feeder.kind == NodeKind.QUEUE:
+                return True
+            if any(
+                incoming.source in queues
+                for incoming in graph.in_edges[feeder.id]
+            ):
+                return True
+        return False
+
     findings = []
-    for queue in graph.of_kind(NodeKind.QUEUE):
-        if not graph.out_edges[queue.id]:
+    for queue_id in queues:
+        queue = graph.nodes[queue_id]
+        if is_dlq(queue_id):
+            continue
+        consumers = [edge.target for edge in graph.out_edges[queue_id]]
+        if not consumers:
             findings.append(
                 Finding(
                     rule="queue_no_consumer",
@@ -220,30 +250,33 @@ def queue_failure_handling(
                     "and silently never done, forever.",
                     mitigation="Connect a worker (or whatever drains it).",
                     when_its_fine="It isn't — an unconsumed queue is a black hole.",
-                    node_ids=[queue.id],
+                    node_ids=[queue_id],
                 )
             )
-        elif not queue.metadata.get("dead_letter"):
+        elif not routes_to_a_queue(queue_id, ignoring=queue_id) and not any(
+            routes_to_a_queue(consumer, ignoring=queue_id)
+            for consumer in consumers
+        ):
             findings.append(
                 Finding(
                     rule="queue_no_dead_letter",
                     severity="warning",
-                    message=f"{queue.label} has no dead-letter handling",
+                    message=f"{queue.label} has no dead-letter path",
                     why=(
                         "A message that always fails will be retried forever, "
                         "blocking the queue or silently vanishing depending on "
                         "the broker."
                     ),
                     mitigation=(
-                        "Add a dead-letter queue and an alert on it, then "
-                        "select this queue and toggle its DLQ chip to record "
-                        "the decision."
+                        "Draw a second queue and route failures into it — an "
+                        "edge from this queue (broker-level DLQ) or from its "
+                        "worker — and alert on it."
                     ),
                     when_its_fine=(
                         "Fire-and-forget work where losing a poisoned message "
                         "is acceptable by design."
                     ),
-                    node_ids=[queue.id],
+                    node_ids=[queue_id],
                 )
             )
     return findings
