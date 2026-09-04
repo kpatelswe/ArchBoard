@@ -177,6 +177,8 @@ def deep_sync_chain(graph: BoardGraph, traffic_rps: float | None) -> list[Findin
             )
         ]
 
+    if not longest_from:  # empty board
+        return []
     hops, path = max(longest_from.values(), key=lambda item: item[0])
     if hops <= MAX_SYNC_CHAIN:
         return []
