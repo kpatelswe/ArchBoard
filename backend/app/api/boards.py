@@ -2,7 +2,14 @@ import uuid
 
 from fastapi import APIRouter, HTTPException, status
 
+from pydantic import BaseModel, Field
+
+from app.analysis.graph import BoardGraph
+from app.analysis.rules import Finding, run_rules
+from app.analysis.simulator import SimulationResult, simulate
 from app.api.deps import CurrentUser, DbSession
+from app.realtime.state import registry
+from app.schemas.snapshot import BoardSnapshot
 from app.core.exceptions import (
     AccessDenied,
     InsufficientRole,
@@ -47,6 +54,48 @@ async def list_boards(user: CurrentUser, session: DbSession):
         BoardSummary.model_validate(board).model_copy(update={"role": role})
         for board, role in await board_service.list_boards(session, user=user)
     ]
+
+
+class AnalysisResult(BaseModel):
+    findings: list[Finding] = Field(default_factory=list)
+    simulation: SimulationResult
+
+
+@router.get("/{board_id}/analysis", response_model=AnalysisResult)
+async def analyze_board(
+    board_id: uuid.UUID,
+    user: CurrentUser,
+    session: DbSession,
+    traffic_rps: float = 100,
+):
+    """Run the design linter + traffic simulation.
+
+    Analyzes the LIVE board when a realtime session holds it — a linter that
+    lags behind the drawing is a linter nobody trusts — and falls back to the
+    persisted snapshot when nobody is connected. Read-only and stateless.
+    """
+    try:
+        board, _role = await board_service.get_board_with_role(
+            session, user=user, board_id=board_id
+        )
+    except (NotFound, AccessDenied):
+        raise _not_found()
+
+    live = registry.peek(board_id)
+    raw = live.to_snapshot() if live is not None else board.current_snapshot
+    try:
+        snapshot = BoardSnapshot.model_validate(raw)
+    except ValueError:
+        # Post-merge validation is the CRDT tradeoff: a peer can put junk in
+        # the doc. Refusing to analyze beats crashing.
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, "board state is not analyzable"
+        )
+    graph = BoardGraph.from_snapshot(snapshot)
+    return AnalysisResult(
+        findings=run_rules(graph, traffic_rps),
+        simulation=simulate(graph, traffic_rps),
+    )
 
 
 @router.get("/{board_id}", response_model=BoardRead)
