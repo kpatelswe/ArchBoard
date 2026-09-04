@@ -49,6 +49,9 @@ type CanvasProps = {
   sendEvent?: (event: BoardEvent) => void
   subscribe?: (handler: (event: BoardEvent) => void) => () => void
   peers?: Peer[]
+  /** Elements implicated by the selected finding — outlined on canvas. */
+  highlightNodes?: string[]
+  highlightEdges?: string[]
 }
 
 function Canvas({
@@ -58,6 +61,8 @@ function Canvas({
   sendEvent,
   subscribe,
   peers = [],
+  highlightNodes = [],
+  highlightEdges = [],
 }: CanvasProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
@@ -270,8 +275,24 @@ function Canvas({
           }}
         >
           <ReactFlow
-            nodes={nodes}
-            edges={edges}
+            nodes={
+              highlightNodes.length
+                ? nodes.map((node) =>
+                    highlightNodes.includes(node.id)
+                      ? { ...node, className: 'is-flagged' }
+                      : node,
+                  )
+                : nodes
+            }
+            edges={
+              highlightEdges.length
+                ? edges.map((edge) =>
+                    highlightEdges.includes(edge.id)
+                      ? { ...edge, className: 'is-flagged' }
+                      : edge,
+                  )
+                : edges
+            }
             onNodesChange={handleNodesChange}
             onEdgesChange={handleEdgesChange}
             onConnect={onConnect}

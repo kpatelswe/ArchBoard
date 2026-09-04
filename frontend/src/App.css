@@ -576,11 +576,161 @@
 
 /* ============ canvas layout ============ */
 
+.board__body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.board__body > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.board__traffic {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--ink-soft);
+}
+
+.board__traffic input {
+  width: 58px;
+  padding: 2px 6px;
+  font: inherit;
+  color: var(--ink);
+  text-align: right;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+}
+
+/* ============ findings panel (the linter output) ============ */
+
+.findings {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 0 0 250px;
+  padding: 12px 10px;
+  overflow-y: auto;
+  background: var(--paper);
+  border-left: 1px solid var(--line);
+}
+
+.findings__heading {
+  padding: 0 6px 4px;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--ink-faint);
+  text-transform: uppercase;
+}
+
+.findings__headroom {
+  padding: 0 6px 6px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--ink-soft);
+}
+
+.findings__empty {
+  padding: 0 6px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--ink-faint);
+}
+
+.finding {
+  display: grid;
+  gap: 4px;
+  padding: 8px 9px;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  transition: border-color 100ms;
+}
+
+.finding:hover {
+  border-color: var(--line-strong);
+}
+
+.finding.is-open {
+  border-color: var(--ink-soft);
+}
+
+.finding__head {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.finding__glyph {
+  font-weight: 700;
+}
+
+.finding--error .finding__head {
+  color: var(--danger);
+}
+
+.finding--warning .finding__head {
+  color: var(--warn);
+}
+
+.finding--suggestion .finding__head {
+  color: var(--ink-faint);
+}
+
+.finding__rule {
+  color: inherit;
+}
+
+.finding__message {
+  line-height: 1.4;
+  color: var(--ink);
+}
+
+.finding__detail {
+  display: grid;
+  gap: 6px;
+  padding-top: 4px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--ink-soft);
+  border-top: 1px solid var(--line);
+}
+
+/* elements implicated by the selected finding */
+.react-flow__node.is-flagged .node {
+  outline: 2px solid var(--danger);
+  outline-offset: 3px;
+}
+
+.react-flow__edge.is-flagged .react-flow__edge-path {
+  stroke: var(--danger);
+  stroke-width: 2;
+}
+
 .canvas {
   display: grid;
   flex: 1;
   grid-template-columns: 196px 1fr;
   min-height: 0;
+}
+
+/* viewers get no palette; don't reserve its column */
+.canvas:has(> .canvas__surface:first-child) {
+  grid-template-columns: 1fr;
 }
 
 .canvas__surface {

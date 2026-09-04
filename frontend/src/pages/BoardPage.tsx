@@ -2,8 +2,17 @@ import { useAuth } from '@clerk/react'
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { BoardCanvas } from '../canvas/BoardCanvas'
+import { FindingsPanel } from '../canvas/FindingsPanel'
 import { useBoardSocket } from '../lib/useBoardSocket'
-import { createInvite, getBoard, type Board } from '../lib/api'
+import {
+  createInvite,
+  fetchAnalysis,
+  getBoard,
+  type AnalysisResult,
+  type Board,
+} from '../lib/api'
+
+const ANALYSIS_DEBOUNCE_MS = 1500
 
 export function BoardPage() {
   const { boardId } = useParams<{ boardId: string }>()
@@ -11,8 +20,44 @@ export function BoardPage() {
   const [board, setBoard] = useState<Board | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [shareMessage, setShareMessage] = useState<string | null>(null)
+  const [traffic, setTraffic] = useState(100)
+  const [analysis, setAnalysis] = useState<AnalysisResult | null>(null)
+  const [highlight, setHighlight] = useState<{ nodes: string[]; edges: string[] }>({
+    nodes: [],
+    edges: [],
+  })
   const socket = useBoardSocket(boardId)
   const socketLive = socket.state === 'live'
+
+  // The linter runs like an editor's: re-analyze ~1.5s after the last board
+  // change (the doc's update events are the trigger), plus once on join and
+  // whenever the traffic assumption changes. Each run is a few ms of server
+  // work against the live CRDT state.
+  const { doc, docReady } = socket
+  useEffect(() => {
+    if (!boardId || !doc || !docReady) return
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const run = async () => {
+      try {
+        const result = await fetchAnalysis(await getToken(), boardId, traffic)
+        if (!cancelled) setAnalysis(result)
+      } catch {
+        // transient (expired token mid-refresh, reconnect); next edit retries
+      }
+    }
+    const schedule = () => {
+      clearTimeout(timer)
+      timer = setTimeout(run, ANALYSIS_DEBOUNCE_MS)
+    }
+    void run()
+    doc.on('update', schedule)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+      doc.off('update', schedule)
+    }
+  }, [boardId, doc, docReady, traffic, getToken])
 
   // REST fetch covers the board's metadata (name, role). The graph itself
   // arrives over the socket as the CRDT document: there is no snapshot
@@ -58,6 +103,18 @@ export function BoardPage() {
         </div>
 
         <div className="board__bar-group">
+          <label className="board__traffic">
+            traffic
+            <input
+              type="number"
+              min={1}
+              value={traffic}
+              onChange={(event) =>
+                setTraffic(Math.max(1, Number(event.target.value) || 1))
+              }
+            />
+            rps
+          </label>
           <span className="board__peers">
             {socket.peers.map((peer) =>
               peer.avatar_url ? (
@@ -113,14 +170,22 @@ export function BoardPage() {
           )}
         </div>
       </div>
-      <BoardCanvas
-        doc={socket.doc}
-        docReady={socket.docReady}
-        readOnly={readOnly}
-        sendEvent={socket.send}
-        subscribe={socket.subscribe}
-        peers={socket.peers}
-      />
+      <div className="board__body">
+        <BoardCanvas
+          doc={socket.doc}
+          docReady={socket.docReady}
+          readOnly={readOnly}
+          sendEvent={socket.send}
+          subscribe={socket.subscribe}
+          peers={socket.peers}
+          highlightNodes={highlight.nodes}
+          highlightEdges={highlight.edges}
+        />
+        <FindingsPanel
+          analysis={analysis}
+          onHighlight={(nodes, edges) => setHighlight({ nodes, edges })}
+        />
+      </div>
     </section>
   )
 }

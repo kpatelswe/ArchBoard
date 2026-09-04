@@ -124,3 +124,43 @@ export const acceptInvite = (token: string | null, inviteToken: string) =>
     method: 'POST',
     body: JSON.stringify({ token: inviteToken }),
   })
+
+export type Finding = {
+  rule: string
+  severity: 'error' | 'warning' | 'suggestion'
+  message: string
+  why: string
+  mitigation: string
+  when_its_fine: string
+  node_ids: string[]
+  edge_ids: string[]
+}
+
+export type NodeLoad = {
+  node_id: string
+  label: string
+  incoming_rps: number
+  capacity_rps: number | null
+  utilization: number | null
+}
+
+export type AnalysisResult = {
+  findings: Finding[]
+  simulation: {
+    traffic_rps: number
+    loads: NodeLoad[]
+    findings: Finding[]
+    headroom: number | null
+    bottleneck_id: string | null
+  }
+}
+
+export const fetchAnalysis = (
+  token: string | null,
+  id: string,
+  trafficRps: number,
+) =>
+  apiFetch<AnalysisResult>(
+    `/api/boards/${id}/analysis?traffic_rps=${trafficRps}`,
+    token,
+  )
