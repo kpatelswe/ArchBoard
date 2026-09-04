@@ -17,7 +17,6 @@ from app.schemas.snapshot import ANNOTATION_KINDS, BoardSnapshot, NodeKind
 # questions about the paths between these two sets.
 ENTRY_KINDS = {NodeKind.CLIENT}
 PERSISTENT_KINDS = {NodeKind.DATABASE, NodeKind.OBJECT_STORAGE}
-CACHE_KINDS = {NodeKind.CACHE, NodeKind.REDIS, NodeKind.CDN}
 
 
 @dataclass(frozen=True)

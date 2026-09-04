@@ -20,7 +20,6 @@ export function BoardPage() {
   const [board, setBoard] = useState<Board | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [shareMessage, setShareMessage] = useState<string | null>(null)
-  const [traffic, setTraffic] = useState(100)
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null)
   const [highlight, setHighlight] = useState<{ nodes: string[]; edges: string[] }>({
     nodes: [],
@@ -30,9 +29,8 @@ export function BoardPage() {
   const socketLive = socket.state === 'live'
 
   // The linter runs like an editor's: re-analyze ~1.5s after the last board
-  // change (the doc's update events are the trigger), plus once on join and
-  // whenever the traffic assumption changes. Each run is a few ms of server
-  // work against the live CRDT state.
+  // change (the doc's update events are the trigger), plus once on join.
+  // Each run is a few ms of server work against the live CRDT state.
   const { doc, docReady } = socket
   useEffect(() => {
     if (!boardId || !doc || !docReady) return
@@ -40,7 +38,7 @@ export function BoardPage() {
     let timer: ReturnType<typeof setTimeout> | undefined
     const run = async () => {
       try {
-        const result = await fetchAnalysis(await getToken(), boardId, traffic)
+        const result = await fetchAnalysis(await getToken(), boardId)
         if (!cancelled) setAnalysis(result)
       } catch {
         // transient (expired token mid-refresh, reconnect); next edit retries
@@ -57,7 +55,7 @@ export function BoardPage() {
       clearTimeout(timer)
       doc.off('update', schedule)
     }
-  }, [boardId, doc, docReady, traffic, getToken])
+  }, [boardId, doc, docReady, getToken])
 
   // REST fetch covers the board's metadata (name, role). The graph itself
   // arrives over the socket as the CRDT document: there is no snapshot
@@ -103,18 +101,6 @@ export function BoardPage() {
         </div>
 
         <div className="board__bar-group">
-          <label className="board__traffic">
-            traffic
-            <input
-              type="number"
-              min={1}
-              value={traffic}
-              onChange={(event) =>
-                setTraffic(Math.max(1, Number(event.target.value) || 1))
-              }
-            />
-            rps
-          </label>
           <span className="board__peers">
             {socket.peers.map((peer) =>
               peer.avatar_url ? (

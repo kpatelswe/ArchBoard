@@ -1,6 +1,6 @@
-"""The design linter: eight deterministic rules over a BoardGraph.
+"""The design linter: seven deterministic structural rules over a BoardGraph.
 
-Every rule is a pure function `(graph, traffic_rps) -> list[Finding]` — no
+Every rule is a pure function `(graph) -> list[Finding]` — no
 database, no network, no randomness, so the same board always lints the same
 way and every rule is testable against a hand-built graph. Findings follow the
 PRD's contextual format: what, why, how to fix, and when it's actually fine.
@@ -10,17 +10,11 @@ from typing import Callable, Literal
 
 from pydantic import BaseModel, Field
 
-from app.analysis.graph import (
-    CACHE_KINDS,
-    ENTRY_KINDS,
-    PERSISTENT_KINDS,
-    BoardGraph,
-)
+from app.analysis.graph import ENTRY_KINDS, PERSISTENT_KINDS, BoardGraph
 from app.schemas.snapshot import NodeKind
 
 MAX_SYNC_FANOUT = 3
 MAX_SYNC_CHAIN = 4
-LOW_TRAFFIC_RPS = 100
 
 
 class Finding(BaseModel):
@@ -34,7 +28,7 @@ class Finding(BaseModel):
     edge_ids: list[str] = Field(default_factory=list)
 
 
-Rule = Callable[[BoardGraph, float | None], list[Finding]]
+Rule = Callable[[BoardGraph], list[Finding]]
 
 
 def _labels(graph: BoardGraph, node_ids: list[str]) -> str:
@@ -44,9 +38,7 @@ def _labels(graph: BoardGraph, node_ids: list[str]) -> str:
 # -- 1. single point of failure ---------------------------------------------
 
 
-def single_point_of_failure(
-    graph: BoardGraph, traffic_rps: float | None
-) -> list[Finding]:
+def single_point_of_failure(graph: BoardGraph) -> list[Finding]:
     """A node whose death disconnects clients from durable data. Checked the
     honest way at whiteboard scale: pretend each node is dead (BFS skips it)
     and see whether any persistent store falls off the map."""
@@ -91,7 +83,7 @@ def single_point_of_failure(
 # -- 2. excessive sync fan-out ----------------------------------------------
 
 
-def sync_fanout(graph: BoardGraph, traffic_rps: float | None) -> list[Finding]:
+def sync_fanout(graph: BoardGraph) -> list[Finding]:
     findings = []
     for node_id, edges in graph.out_edges.items():
         sync = [edge for edge in edges if edge.synchronous]
@@ -128,7 +120,7 @@ def sync_fanout(graph: BoardGraph, traffic_rps: float | None) -> list[Finding]:
 # -- 3. deep sync chain (and sync cycles) ------------------------------------
 
 
-def deep_sync_chain(graph: BoardGraph, traffic_rps: float | None) -> list[Finding]:
+def deep_sync_chain(graph: BoardGraph) -> list[Finding]:
     """Longest path in the synchronous subgraph via DFS with memoization.
     A cycle in that subgraph is its own (worse) finding: request A waiting on
     B waiting on A is a deadlock built into the architecture."""
@@ -207,9 +199,7 @@ def deep_sync_chain(graph: BoardGraph, traffic_rps: float | None) -> list[Findin
 # -- 5. queue without failure handling ---------------------------------------
 
 
-def queue_failure_handling(
-    graph: BoardGraph, traffic_rps: float | None
-) -> list[Finding]:
+def queue_failure_handling(graph: BoardGraph) -> list[Finding]:
     """Dead-letter handling is read from the TOPOLOGY, not a flag: if the
     design has a DLQ, it should be an actual queue on the board, wired in.
     A queue "has" dead-letter handling when it (or one of its consumers)
@@ -287,7 +277,7 @@ def queue_failure_handling(
 # -- 6-8. hygiene -------------------------------------------------------------
 
 
-def orphan_nodes(graph: BoardGraph, traffic_rps: float | None) -> list[Finding]:
+def orphan_nodes(graph: BoardGraph) -> list[Finding]:
     orphans = [
         node_id
         for node_id in graph.nodes
@@ -309,7 +299,7 @@ def orphan_nodes(graph: BoardGraph, traffic_rps: float | None) -> list[Finding]:
     ]
 
 
-def no_persistent_store(graph: BoardGraph, traffic_rps: float | None) -> list[Finding]:
+def no_persistent_store(graph: BoardGraph) -> list[Finding]:
     if not graph.nodes or graph.of_kind(*PERSISTENT_KINDS):
         return []
     return [
@@ -327,7 +317,7 @@ def no_persistent_store(graph: BoardGraph, traffic_rps: float | None) -> list[Fi
     ]
 
 
-def layering_violation(graph: BoardGraph, traffic_rps: float | None) -> list[Finding]:
+def layering_violation(graph: BoardGraph) -> list[Finding]:
     forbidden = PERSISTENT_KINDS | {NodeKind.EXTERNAL_API}
     findings = []
     for edge in graph.edges:
@@ -357,64 +347,6 @@ def layering_violation(graph: BoardGraph, traffic_rps: float | None) -> list[Fin
     return findings
 
 
-# -- 9. over-engineering ------------------------------------------------------
-
-
-def over_engineering(graph: BoardGraph, traffic_rps: float | None) -> list[Finding]:
-    """The inverse linter: infrastructure whose cost exceeds its benefit at
-    the stated traffic. Only fires when traffic is actually stated."""
-    if traffic_rps is None or traffic_rps >= LOW_TRAFFIC_RPS:
-        return []
-    findings = []
-    queues = graph.of_kind(NodeKind.QUEUE)
-    workers = graph.of_kind(NodeKind.WORKER)
-    if queues and workers:
-        findings.append(
-            Finding(
-                rule="over_engineering",
-                severity="suggestion",
-                message=(
-                    f"Queue + workers at {traffic_rps:.0f} RPS is probably premature"
-                ),
-                why=(
-                    "At this traffic a direct call handles the load; the queue "
-                    "adds latency, a broker to operate, and new failure modes "
-                    "without buying scale you need."
-                ),
-                mitigation="Do the work inline; introduce the queue when a "
-                "measured bottleneck (or a genuinely slow task) demands it.",
-                when_its_fine=(
-                    "The work is slow/bursty by nature (emails, exports), or "
-                    "you're deliberately building for 100× growth."
-                ),
-                node_ids=[node.id for node in queues + workers],
-            )
-        )
-    caches = graph.of_kind(*CACHE_KINDS)
-    if len(caches) >= 2:
-        findings.append(
-            Finding(
-                rule="over_engineering",
-                severity="suggestion",
-                message=(
-                    f"{len(caches)} cache layers at {traffic_rps:.0f} RPS is "
-                    "probably premature"
-                ),
-                why=(
-                    "Each cache layer is an invalidation problem and a "
-                    "staleness source; at this traffic the database alone is "
-                    "likely bored."
-                ),
-                mitigation="Start with none (or one), and add layers when "
-                "measurements say the origin is hot.",
-                when_its_fine="Read patterns you already know are brutal, or a "
-                "CDN that exists for geography rather than load.",
-                node_ids=[node.id for node in caches],
-            )
-        )
-    return findings
-
-
 ALL_RULES: list[Rule] = [
     single_point_of_failure,
     sync_fanout,
@@ -423,14 +355,11 @@ ALL_RULES: list[Rule] = [
     orphan_nodes,
     no_persistent_store,
     layering_violation,
-    over_engineering,
 ]
 
 _SEVERITY_ORDER = {"error": 0, "warning": 1, "suggestion": 2}
 
 
-def run_rules(graph: BoardGraph, traffic_rps: float | None = None) -> list[Finding]:
-    findings = [
-        finding for rule in ALL_RULES for finding in rule(graph, traffic_rps)
-    ]
+def run_rules(graph: BoardGraph) -> list[Finding]:
+    findings = [finding for rule in ALL_RULES for finding in rule(graph)]
     return sorted(findings, key=lambda finding: _SEVERITY_ORDER[finding.severity])

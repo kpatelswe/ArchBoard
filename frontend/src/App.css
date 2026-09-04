@@ -587,26 +587,6 @@
   min-width: 0;
 }
 
-.board__traffic {
-  display: inline-flex;
-  gap: 5px;
-  align-items: center;
-  font-family: var(--mono);
-  font-size: 10.5px;
-  color: var(--ink-soft);
-}
-
-.board__traffic input {
-  width: 58px;
-  padding: 2px 6px;
-  font: inherit;
-  color: var(--ink);
-  text-align: right;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-s);
-}
-
 /* ============ findings panel (the linter output) ============ */
 
 .findings {
@@ -628,13 +608,6 @@
   letter-spacing: 0.12em;
   color: var(--ink-faint);
   text-transform: uppercase;
-}
-
-.findings__headroom {
-  padding: 0 6px 6px;
-  font-family: var(--mono);
-  font-size: 10.5px;
-  color: var(--ink-soft);
 }
 
 .findings__empty {

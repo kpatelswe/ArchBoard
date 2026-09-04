@@ -136,31 +136,9 @@ export type Finding = {
   edge_ids: string[]
 }
 
-export type NodeLoad = {
-  node_id: string
-  label: string
-  incoming_rps: number
-  capacity_rps: number | null
-  utilization: number | null
-}
-
 export type AnalysisResult = {
   findings: Finding[]
-  simulation: {
-    traffic_rps: number
-    loads: NodeLoad[]
-    findings: Finding[]
-    headroom: number | null
-    bottleneck_id: string | null
-  }
 }
 
-export const fetchAnalysis = (
-  token: string | null,
-  id: string,
-  trafficRps: number,
-) =>
-  apiFetch<AnalysisResult>(
-    `/api/boards/${id}/analysis?traffic_rps=${trafficRps}`,
-    token,
-  )
+export const fetchAnalysis = (token: string | null, id: string) =>
+  apiFetch<AnalysisResult>(`/api/boards/${id}/analysis`, token)

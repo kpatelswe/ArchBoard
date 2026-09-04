@@ -6,7 +6,6 @@ from pydantic import BaseModel, Field
 
 from app.analysis.graph import BoardGraph
 from app.analysis.rules import Finding, run_rules
-from app.analysis.simulator import SimulationResult, simulate
 from app.api.deps import CurrentUser, DbSession
 from app.realtime.state import registry
 from app.schemas.snapshot import BoardSnapshot
@@ -58,7 +57,6 @@ async def list_boards(user: CurrentUser, session: DbSession):
 
 class AnalysisResult(BaseModel):
     findings: list[Finding] = Field(default_factory=list)
-    simulation: SimulationResult
 
 
 @router.get("/{board_id}/analysis", response_model=AnalysisResult)
@@ -66,9 +64,8 @@ async def analyze_board(
     board_id: uuid.UUID,
     user: CurrentUser,
     session: DbSession,
-    traffic_rps: float = 100,
 ):
-    """Run the design linter + traffic simulation.
+    """Run the structural design linter.
 
     Analyzes the LIVE board when a realtime session holds it — a linter that
     lags behind the drawing is a linter nobody trusts — and falls back to the
@@ -92,10 +89,7 @@ async def analyze_board(
             status.HTTP_422_UNPROCESSABLE_ENTITY, "board state is not analyzable"
         )
     graph = BoardGraph.from_snapshot(snapshot)
-    return AnalysisResult(
-        findings=run_rules(graph, traffic_rps),
-        simulation=simulate(graph, traffic_rps),
-    )
+    return AnalysisResult(findings=run_rules(graph))
 
 
 @router.get("/{board_id}", response_model=BoardRead)

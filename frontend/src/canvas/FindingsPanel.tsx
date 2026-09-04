@@ -23,12 +23,7 @@ export function FindingsPanel({
     )
   }
 
-  const findings: Finding[] = [
-    ...analysis.findings,
-    ...analysis.simulation.findings,
-  ]
-  const { headroom, bottleneck_id, loads } = analysis.simulation
-  const bottleneck = loads.find((load) => load.node_id === bottleneck_id)
+  const findings: Finding[] = analysis.findings
 
   function toggle(index: number, finding: Finding) {
     if (openIndex === index) {
@@ -43,11 +38,6 @@ export function FindingsPanel({
   return (
     <aside className="findings">
       <h2 className="findings__heading">Analysis</h2>
-      {headroom !== null && bottleneck && (
-        <p className="findings__headroom">
-          headroom {headroom.toFixed(1)}× · {bottleneck.label} saturates first
-        </p>
-      )}
       {findings.length === 0 ? (
         <p className="findings__empty">no findings — clean board</p>
       ) : (
