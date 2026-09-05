@@ -3,6 +3,8 @@
 Sketch system architectures with your team in real time, and let the board
 tell you where they break.
 
+**Live at [archboard.kishanpatel.ca](https://archboard.kishanpatel.ca)**
+
 <!-- TODO: drop a screenshot/GIF here: board with cursors + a red SPOF finding -->
 <!-- <p align="center"><img src="docs/screenshot.png" width="720"/></p> -->
 
@@ -39,7 +41,18 @@ Browser ──WebSocket──▶ FastAPI ──┬─▶ PostgreSQL (boards, use
 **Stack:** React · React Flow · TypeScript · FastAPI · SQLAlchemy · Yjs /
 pycrdt · PostgreSQL (Neon) · Redis · Clerk
 
-## Run it
+## Deployment
+
+The frontend ships as static assets on **Vercel** behind a custom domain.
+The backend is a **Docker** image on **Railway** — it holds WebSockets,
+in-memory CRDT replicas, and a Redis subscription, so it runs as a
+long-lived process rather than serverless — with **Redis** alongside it,
+**PostgreSQL** on Neon, and **Clerk** serving production auth first-party
+from the app's own domain. Pushing to `main` deploys both halves.
+Multiple backend instances converge through Redis pub/sub, so the service
+scales horizontally with no sticky sessions.
+
+## Local development
 
 ```bash
 cp .env.example .env && cp frontend/.env.example frontend/.env   # Neon + Clerk keys
@@ -49,6 +62,3 @@ cd frontend && npm install && npm run dev    # http://localhost:5173
 ```
 
 Open the same board in two browser profiles to see the realtime layer work.
-Deploy notes: the frontend is static (Vercel), while the backend holds
-WebSockets and in-memory replicas, so it wants a long-lived host
-(Fly/Railway/VPS) with Redis next to it.
