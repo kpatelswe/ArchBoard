@@ -16,4 +16,12 @@ RUN uv sync --frozen --no-dev
 ENV PATH="/app/.venv/bin:$PATH"
 
 # $PORT is set by the platform (Render/Railway); 8000 locally.
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+#
+# WebSocket intake caps: uvicorn defaults to 16MB frames x a 32-message
+# inbound queue per socket (512MB a client can make us hold before any
+# backpressure). The handler's own 64KB check runs only after a frame is
+# fully in memory, so the real limit has to live here, where the library
+# rejects oversized frames (close 1009) before allocating them. 64KB matches
+# MAX_FRAME_BYTES in app/websocket/routes.py; the queue is shallow because
+# every frame costs Redis round-trips, so a deep queue only buys memory use.
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --ws-max-size 65536 --ws-max-queue 8"]

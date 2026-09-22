@@ -22,6 +22,10 @@ CLOSE_UNAUTHENTICATED = 4401
 CLOSE_FORBIDDEN = 4403
 CLOSE_RATE_LIMITED = 4429  # mirrors HTTP 429
 
+# Backstop only: uvicorn enforces the same cap (--ws-max-size in the
+# Dockerfile) before a frame is allocated. This check runs after the frame is
+# already in memory, so it protects nothing on its own; it stays so that a
+# dev server started without the flag still refuses oversized frames.
 MAX_FRAME_BYTES = 64_000
 
 # Identifies this backend process on the bus, so a process can tell its own
