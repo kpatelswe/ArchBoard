@@ -154,7 +154,15 @@ async def board_websocket(websocket: WebSocket, board_id: uuid.UUID) -> None:
                 break
             update: bytes | None = message.get("bytes")
             raw: str | None = message.get("text")
-            if len(update or "") > MAX_FRAME_BYTES or len(raw or "") > MAX_FRAME_BYTES:
+            frame_bytes = len(update or "") or len(raw or "")
+            if frame_bytes > MAX_FRAME_BYTES:
+                # Logged because this is the signature of a memory attack:
+                # correlate with a memory spike to tell hostile input from a
+                # leak.
+                logger.warning(
+                    "websocket frame too large: %d bytes user=%s board=%s",
+                    frame_bytes, user_id, board_id,
+                )
                 await websocket.send_json(events.error_frame("frame too large"))
                 continue
 
@@ -162,6 +170,10 @@ async def board_websocket(websocket: WebSocket, board_id: uuid.UUID) -> None:
             action = rate_limit.verdict(count)
             if action == "disconnect":
                 # Sustained flooding: stop paying to read this socket at all.
+                logger.warning(
+                    "websocket rate limit disconnect: %d events/window user=%s board=%s",
+                    count, user_id, board_id,
+                )
                 await websocket.close(CLOSE_RATE_LIMITED, "rate limit exceeded")
                 break
             if action == "drop":
