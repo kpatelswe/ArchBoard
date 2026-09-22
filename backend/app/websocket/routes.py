@@ -1,5 +1,7 @@
 import base64
+import logging
 import uuid
+from collections.abc import Awaitable
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
@@ -15,6 +17,7 @@ from app.auth.dependencies import verify_session_token
 from app.repositories import membership_repository, user_repository
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 # App-level close codes live in the 4000-4999 range the WebSocket spec
 # reserves for private use; 1000-3999 belong to the protocol and registries.
@@ -110,11 +113,16 @@ async def board_websocket(websocket: WebSocket, board_id: uuid.UUID) -> None:
         user_id=user_id,
         role=role,
     )
-    manager.add(board_id, connection)
-    if manager.count(board_id) == 1:
-        await bus.subscribe(board_id, _on_bus_message)
 
+    # Everything from the first registration onward runs under the finally:
+    # if the bus subscribe (a Redis round-trip) fails after manager.add, the
+    # connection and the board's CRDT state would otherwise stay registered
+    # forever, since only the teardown releases them.
     try:
+        manager.add(board_id, connection)
+        if manager.count(board_id) == 1:
+            await bus.subscribe(board_id, _on_bus_message)
+
         await websocket.send_json(
             {
                 "type": "connected",
@@ -231,12 +239,35 @@ async def board_websocket(websocket: WebSocket, board_id: uuid.UUID) -> None:
     except WebSocketDisconnect:
         pass
     finally:
-        manager.remove(board_id, connection)
-        if manager.count(board_id) == 0:
-            await bus.unsubscribe(board_id)
-        await registry.release(board_id, manager.count(board_id))
-        await presence.clear(board_id, user_id)
-        await _publish(
-            board_id,
-            {"type": "board.left", "user_id": str(user_id)},
-        )
+        await _teardown(board_id, connection)
+
+
+async def _teardown(board_id: uuid.UUID, connection: BoardConnection) -> None:
+    """Undo everything connect registered, even when a step fails.
+
+    Each step is independent, and every one after the local remove talks to
+    Redis or Postgres. If one raised straight through, the ones after it
+    would be skipped: a failed unsubscribe would leave the board's CRDT
+    state (and its pending flush task) in the registry for the life of the
+    process. So each step is attempted regardless of the others; failures
+    are logged, not propagated, because the socket is already gone and
+    there is nobody left to report them to.
+    """
+    manager.remove(board_id, connection)
+    if manager.count(board_id) == 0:
+        await _attempt("bus.unsubscribe", bus.unsubscribe(board_id))
+    await _attempt(
+        "registry.release", registry.release(board_id, manager.count(board_id))
+    )
+    await _attempt("presence.clear", presence.clear(board_id, connection.user_id))
+    await _attempt(
+        "publish board.left",
+        _publish(board_id, {"type": "board.left", "user_id": str(connection.user_id)}),
+    )
+
+
+async def _attempt(what: str, step: Awaitable[None]) -> None:
+    try:
+        await step
+    except Exception:
+        logger.exception("websocket teardown step failed: %s", what)
