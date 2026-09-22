@@ -19,9 +19,12 @@ ENV PATH="/app/.venv/bin:$PATH"
 #
 # WebSocket intake caps: uvicorn defaults to 16MB frames x a 32-message
 # inbound queue per socket (512MB a client can make us hold before any
-# backpressure). The handler's own 64KB check runs only after a frame is
+# backpressure). The handler's own size check runs only after a frame is
 # fully in memory, so the real limit has to live here, where the library
-# rejects oversized frames (close 1009) before allocating them. 64KB matches
-# MAX_FRAME_BYTES in app/websocket/routes.py; the queue is shallow because
-# every frame costs Redis round-trips, so a deep queue only buys memory use.
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --ws-max-size 65536 --ws-max-queue 8"]
+# rejects oversized frames (close 1009) before allocating them. 1MB, not
+# the handler's 64KB: on every (re)connect the client pushes its whole CRDT
+# document in one frame, and that grows with edit history (a 3-node board
+# is already ~10KB), so a tight cap here would reconnect-loop a big board.
+# Worst case is now 8MB per socket. The queue is shallow because every
+# frame costs Redis round-trips, so a deep queue only buys memory use.
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --ws-max-size 1048576 --ws-max-queue 8"]

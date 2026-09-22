@@ -25,11 +25,12 @@ CLOSE_UNAUTHENTICATED = 4401
 CLOSE_FORBIDDEN = 4403
 CLOSE_RATE_LIMITED = 4429  # mirrors HTTP 429
 
-# Backstop only: uvicorn enforces the same cap (--ws-max-size in the
-# Dockerfile) before a frame is allocated. This check runs after the frame is
-# already in memory, so it protects nothing on its own; it stays so that a
-# dev server started without the flag still refuses oversized frames.
-MAX_FRAME_BYTES = 64_000
+# Not a memory defense: this runs after the frame is already in memory.
+# uvicorn's --ws-max-size (Dockerfile) is the real intake cap; this mirrors
+# it so a dev server started without the flag behaves the same. 1MB rather
+# than something tighter because the full-document push on every
+# (re)connect grows with edit history (a 3-node board is already ~10KB).
+MAX_FRAME_BYTES = 1_048_576
 
 # Identifies this backend process on the bus, so a process can tell its own
 # published events (already applied locally) from another process's.

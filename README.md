@@ -57,7 +57,7 @@ scales horizontally with no sticky sessions.
 ```bash
 cp .env.example .env && cp frontend/.env.example frontend/.env   # Neon + Clerk keys
 docker run -d --name archboard-redis -p 6379:6379 redis:7
-cd backend && uv sync && uv run alembic upgrade head && uv run uvicorn app.main:app --reload --port 8000 --ws-max-size 65536 --ws-max-queue 8
+cd backend && uv sync && uv run alembic upgrade head && uv run uvicorn app.main:app --reload --port 8000 --ws-max-size 1048576 --ws-max-queue 8
 cd frontend && npm install && npm run dev    # http://localhost:5173
 ```
 
