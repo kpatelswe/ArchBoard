@@ -1,0 +1,82 @@
+{
+  "id": "first-call",
+  "title": "Start with a model",
+  "notes": {
+    "topic": "The foundations",
+    "minutes": 3,
+    "lead": "A language model can write an answer. That does not mean it can look up an order, remember a customer, or issue a refund. Start by understanding what one model call actually does.",
+    "sections": [
+      {
+        "heading": "One request, one response",
+        "paragraphs": [
+          "Your application sends a prompt to a model API. The prompt can contain instructions, the user’s question, and any context your application provides. The model generates a response from those inputs. Your application returns it to the user.",
+          "In this first diagram, User → Language model is shorthand for that application-mediated request. The browser should not hold the model provider’s secret key. A server normally handles credentials, limits, and the API call."
+        ]
+      },
+      {
+        "heading": "Text is not an action",
+        "paragraphs": [
+          "If a model writes “I refunded your order,” no refund has happened. Generated text does not run an API or prove a fact. The model has no access to your order database unless your application deliberately gives it a way to retrieve that information.",
+          "A single call also has no automatic memory of earlier requests. Conversation history, tools, and control flow are responsibilities we will add around the model—not capabilities we should assume it already has."
+        ]
+      }
+    ],
+    "flow": [
+      "Prompt",
+      "Model",
+      "Generated response"
+    ],
+    "example": {
+      "title": "A customer asks about a refund",
+      "steps": [
+        {
+          "label": "The question",
+          "detail": "“Can you refund order #42?” arrives at your application."
+        },
+        {
+          "label": "The model call",
+          "detail": "With no order data or tools, the model can explain a general process or ask for information."
+        },
+        {
+          "label": "The boundary",
+          "detail": "It cannot confirm eligibility or move money. A useful answer must not pretend otherwise."
+        }
+      ]
+    },
+    "question": {
+      "prompt": "The model replies, “Order #42 has been refunded.” What can you conclude from the model call alone?",
+      "answer": 1,
+      "options": [
+        {
+          "label": "The refund API completed successfully.",
+          "explanation": "A text response does not execute an API. An application must perform and verify the operation separately."
+        },
+        {
+          "label": "Text was generated; no refund is proven.",
+          "explanation": "Exactly. A model response is output, not evidence that an external action happened. Next, you will build this smallest request path."
+        },
+        {
+          "label": "The model must have read the order database.",
+          "explanation": "A model does not gain access to a private database just because an order number appears in a prompt."
+        }
+      ]
+    },
+    "sources": [
+      {
+        "title": "OpenAI: Text generation",
+        "url": "https://platform.openai.com/docs/guides/text"
+      },
+      {
+        "title": "OpenAI: Function calling flow",
+        "url": "https://platform.openai.com/docs/guides/function-calling"
+      }
+    ]
+  },
+  "practice": {
+    "kind": "graph",
+    "labId": "first-call",
+    "title": "Build one model request",
+    "instructions": "You are building a support assistant that can generate a reply but cannot look up orders or issue refunds yet. Add the language model and connect the user to it. Check the design, then step through the simulated request. This diagram abbreviates the application-mediated API call; it does not expose provider credentials in the browser.",
+    "explanation": "The smallest useful request path takes input to a language model and returns generated text. The application handles the API call and credentials. There are no tools or memory in this design, so generated claims about actions or private order data are not verified results."
+  }
+}
