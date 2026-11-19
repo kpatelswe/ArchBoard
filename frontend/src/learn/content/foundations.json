@@ -1,0 +1,519 @@
+{
+  "id": "foundations",
+  "title": "Foundations",
+  "lessons": [
+    {
+      "id": "first-call",
+      "title": "Start with a model",
+      "notes": {
+        "topic": "The foundations",
+        "minutes": 3,
+        "lead": "A language model can write an answer. That does not mean it can look up an order, remember a customer, or issue a refund. Start by understanding what one model call actually does.",
+        "sections": [
+          {
+            "heading": "One request, one response",
+            "paragraphs": [
+              "Your application sends a prompt to a model API. The prompt can contain instructions, the user’s question, and any context your application provides. The model generates a response from those inputs. Your application returns it to the user.",
+              "In this first diagram, User → Language model is shorthand for that application-mediated request. The browser should not hold the model provider’s secret key. A server normally handles credentials, limits, and the API call."
+            ]
+          },
+          {
+            "heading": "Text is not an action",
+            "paragraphs": [
+              "If a model writes “I refunded your order,” no refund has happened. Generated text does not run an API or prove a fact. The model has no access to your order database unless your application deliberately gives it a way to retrieve that information.",
+              "A single call also has no automatic memory of earlier requests. Conversation history, tools, and control flow are responsibilities we will add around the model—not capabilities we should assume it already has."
+            ]
+          }
+        ],
+        "flow": [
+          "Prompt",
+          "Model",
+          "Generated response"
+        ],
+        "example": {
+          "title": "A customer asks about a refund",
+          "steps": [
+            {
+              "label": "The question",
+              "detail": "“Can you refund order #42?” arrives at your application."
+            },
+            {
+              "label": "The model call",
+              "detail": "With no order data or tools, the model can explain a general process or ask for information."
+            },
+            {
+              "label": "The boundary",
+              "detail": "It cannot confirm eligibility or move money. A useful answer must not pretend otherwise."
+            }
+          ]
+        },
+        "question": {
+          "prompt": "The model replies, “Order #42 has been refunded.” What can you conclude from the model call alone?",
+          "answer": 1,
+          "options": [
+            {
+              "label": "The refund API completed successfully.",
+              "explanation": "A text response does not execute an API. An application must perform and verify the operation separately."
+            },
+            {
+              "label": "Text was generated; no refund is proven.",
+              "explanation": "Exactly. A model response is output, not evidence that an external action happened. Next, you will build this smallest request path."
+            },
+            {
+              "label": "The model must have read the order database.",
+              "explanation": "A model does not gain access to a private database just because an order number appears in a prompt."
+            }
+          ]
+        },
+        "sources": [
+          {
+            "title": "OpenAI: Text generation",
+            "url": "https://platform.openai.com/docs/guides/text"
+          },
+          {
+            "title": "OpenAI: Function calling flow",
+            "url": "https://platform.openai.com/docs/guides/function-calling"
+          }
+        ]
+      },
+      "practice": {
+        "kind": "graph",
+        "labId": "first-call",
+        "title": "Build one model request",
+        "instructions": "You are building a support assistant that can generate a reply but cannot look up orders or issue refunds yet. Add the language model and connect the user to it. Check the design, then step through the simulated request. This diagram abbreviates the application-mediated API call; it does not expose provider credentials in the browser.",
+        "explanation": "The smallest useful request path takes input to a language model and returns generated text. The application handles the API call and credentials. There are no tools or memory in this design, so generated claims about actions or private order data are not verified results."
+      }
+    },
+    {
+      "id": "context-windows",
+      "title": "Tokens, context & model limits",
+      "notes": {
+        "topic": "The foundations",
+        "minutes": 5,
+        "lead": "Every model call has a hard size limit called the context window. Instructions, evidence, conversation history, and the answer the model writes all compete for the same space, so an architect has to budget it on purpose instead of discovering the limit in production.",
+        "sections": [
+          {
+            "heading": "What a token is",
+            "paragraphs": [
+              "Models do not read characters or words directly. Text is split into tokens: a short word may be one token, while a long word or an unusual identifier may become several. Images, documents, and tool definitions are tokenized too. Billing and limits are measured in tokens, not in characters or pages.",
+              "Because token counts depend on the model’s tokenizer, guessing from word counts is only a rough estimate. Provider APIs report actual usage on every response, and many offer a counting endpoint so your application can measure a request before sending it."
+            ]
+          },
+          {
+            "heading": "Everything shares one window",
+            "paragraphs": [
+              "The context window covers the whole request plus the generated output. The system instructions, every earlier message, retrieved documents, tool definitions and tool results all count, and so does the response the model is about to write, including any reasoning tokens it produces.",
+              "That last point is easy to miss. If the input already fills the window, there is no room left for a useful answer. A maximum output setting reserves space for the reply; a request whose input plus reserved output exceeds the limit fails or is cut short, depending on the provider."
+            ]
+          },
+          {
+            "heading": "Budget the parts deliberately",
+            "paragraphs": [
+              "Treat the window like a fixed budget with four lines: instructions, evidence, history, and output. Instructions should be short and stable. Evidence is what grounds the answer, so it deserves a protected share. History grows every turn, so it needs a cap and a policy for trimming or summarizing old turns.",
+              "When the budget does not fit, decide what to drop in code before calling the model: summarize older turns, retrieve fewer but better passages, or split the task. Never silently truncate the end of a request, because the end usually holds the newest message."
+            ]
+          }
+        ],
+        "flow": [
+          "Measure each part",
+          "Reserve output space",
+          "Trim history or evidence",
+          "Send the request",
+          "Check reported usage"
+        ],
+        "example": {
+          "title": "A support chat that keeps growing",
+          "steps": [
+            {
+              "label": "The limit",
+              "detail": "A simplified model accepts 8,000 tokens in total, input and output combined, for each request."
+            },
+            {
+              "label": "The problem",
+              "detail": "After twenty turns the history alone uses 5,000 tokens, and the two policy documents need another 3,000, leaving nothing for the reply."
+            },
+            {
+              "label": "The fix",
+              "detail": "The application keeps the last few turns verbatim, replaces older turns with a short summary, and reserves 1,000 tokens for the answer."
+            },
+            {
+              "label": "The check",
+              "detail": "Reported usage after each call is logged so the team sees when conversations approach the limit before users hit errors."
+            }
+          ]
+        },
+        "question": {
+          "prompt": "Your request uses 7,600 input tokens on a model with an 8,000-token window, and answers need about 1,000 tokens. What should the application do?",
+          "answer": 2,
+          "options": [
+            {
+              "label": "Send it; only input counts toward the window.",
+              "explanation": "The generated output counts toward the same window, so 400 remaining tokens cannot hold a 1,000-token answer."
+            },
+            {
+              "label": "Cut the last 600 tokens of the request.",
+              "explanation": "The end of the request usually holds the newest user message. Blind truncation removes the most important input."
+            },
+            {
+              "label": "Trim older history or evidence before sending.",
+              "explanation": "Correct. Reduce input deliberately so instructions, key evidence, recent turns and the reserved output all fit."
+            }
+          ]
+        },
+        "sources": [
+          {
+            "title": "Anthropic: Context windows",
+            "url": "https://docs.anthropic.com/en/docs/build-with-claude/context-windows"
+          },
+          {
+            "title": "Google Gemini API: Understand and count tokens",
+            "url": "https://ai.google.dev/gemini-api/docs/tokens"
+          }
+        ]
+      },
+      "practice": {
+        "kind": "budget",
+        "title": "Fit a support request in the window",
+        "instructions": "Simplified units: the model accepts 8,000 tokens per request, counting instructions, retrieved evidence, conversation history and the reserved answer together. Adjust the four allocations so the request fits while keeping at least 500 tokens of instructions, 3,000 of evidence, 1,000 of recent history, and 1,000 reserved for the answer.",
+        "explanation": "One passing allocation is 750 instruction tokens, 4,000 evidence tokens, 2,000 history tokens and 1,250 output tokens, exactly 8,000. The starting design spent the window on input and left only 500 tokens for the answer, which would truncate the reply.",
+        "fields": [
+          {
+            "id": "instructions",
+            "label": "System instructions",
+            "unit": "tokens",
+            "min": 0,
+            "max": 3000,
+            "step": 250,
+            "initial": 1000
+          },
+          {
+            "id": "evidence",
+            "label": "Retrieved evidence",
+            "unit": "tokens",
+            "min": 0,
+            "max": 6000,
+            "step": 250,
+            "initial": 4000
+          },
+          {
+            "id": "history",
+            "label": "Conversation history",
+            "unit": "tokens",
+            "min": 0,
+            "max": 4000,
+            "step": 250,
+            "initial": 2500
+          },
+          {
+            "id": "output",
+            "label": "Reserved answer space",
+            "unit": "tokens",
+            "min": 0,
+            "max": 3000,
+            "step": 250,
+            "initial": 500
+          }
+        ],
+        "constraints": [
+          {
+            "label": "Everything fits in the 8,000-token window",
+            "coefficients": {
+              "instructions": 1,
+              "evidence": 1,
+              "history": 1,
+              "output": 1
+            },
+            "operator": "<=",
+            "limit": 8000
+          },
+          {
+            "label": "At least 1,000 tokens are reserved for the answer",
+            "coefficients": {
+              "output": 1
+            },
+            "operator": ">=",
+            "limit": 1000
+          },
+          {
+            "label": "At least 3,000 tokens of evidence are kept",
+            "coefficients": {
+              "evidence": 1
+            },
+            "operator": ">=",
+            "limit": 3000
+          },
+          {
+            "label": "At least 500 tokens of instructions are kept",
+            "coefficients": {
+              "instructions": 1
+            },
+            "operator": ">=",
+            "limit": 500
+          },
+          {
+            "label": "At least 1,000 tokens of recent history are kept",
+            "coefficients": {
+              "history": 1
+            },
+            "operator": ">=",
+            "limit": 1000
+          }
+        ],
+        "solution": {
+          "instructions": 750,
+          "evidence": 4000,
+          "history": 2000,
+          "output": 1250
+        }
+      }
+    },
+    {
+      "id": "structured-output",
+      "title": "Make outputs predictable",
+      "notes": {
+        "topic": "The foundations",
+        "minutes": 5,
+        "lead": "Free-form text is fine for a person to read, but code that acts on a model’s answer needs fields it can rely on. Structured output turns a reply into typed data, and your application decides what happens when that data is missing, refused, or wrong.",
+        "sections": [
+          {
+            "heading": "Define the shape first",
+            "paragraphs": [
+              "Start by writing the response type your code needs, usually as a JSON Schema or a typed model such as a Pydantic or Zod object. Each field has a type, required fields are explicit, and fields with a fixed set of values use an enum. A support triage reply might need a category, a priority from low to urgent, and a short summary.",
+              "Provider features such as structured outputs constrain the model to that schema. This is stronger than asking for JSON in the prompt or using a plain JSON mode, which guarantees valid JSON syntax but not that the required fields and allowed values are present."
+            ]
+          },
+          {
+            "heading": "A schema is not the whole contract",
+            "paragraphs": [
+              "Even with schema enforcement, a call can end without usable data. The model may refuse for safety reasons, which providers report as a distinct refusal rather than a filled object. The response may be incomplete because it hit the output token limit. The API call itself may fail. Each case needs its own branch in code.",
+              "A schema also cannot express every business rule. It can say an order ID is a string, not that the order belongs to this customer. Validate parsed data against your own rules before using it, and treat a value the model produced as a claim to check, not a verified fact."
+            ]
+          },
+          {
+            "heading": "Repair, but with a limit",
+            "paragraphs": [
+              "When validation fails, one bounded retry that includes the validation error is often enough. Retrying forever wastes cost and can hide a broken prompt or schema. After the limit, return a clear error, fall back to a safe default, or route the request to a person.",
+              "Log the failure category, not just the fact that something failed. Refusals, truncations and rule violations have different fixes, and you cannot improve what you cannot tell apart."
+            ]
+          }
+        ],
+        "flow": [
+          "Define the schema",
+          "Call with schema enforcement",
+          "Branch on refusal or incomplete",
+          "Validate business rules",
+          "Retry once or escalate"
+        ],
+        "example": {
+          "title": "Triage a support ticket",
+          "steps": [
+            {
+              "label": "The schema",
+              "detail": "The application requires category, priority from a four-value enum, and a summary of at most 200 characters."
+            },
+            {
+              "label": "A good call",
+              "detail": "The model returns a valid object; code checks that the category maps to a real queue before routing the ticket."
+            },
+            {
+              "label": "A truncated call",
+              "detail": "Another response stops at the output limit, so the application treats it as incomplete instead of parsing a partial object."
+            },
+            {
+              "label": "The bounded repair",
+              "detail": "One retry with a larger output limit succeeds; had it failed, the ticket would go to the manual triage queue."
+            }
+          ]
+        },
+        "question": {
+          "prompt": "Schema enforcement is on, but the response is marked as a refusal. What should your code do?",
+          "answer": 1,
+          "options": [
+            {
+              "label": "Parse it anyway; the schema guarantees the fields.",
+              "explanation": "Schema adherence applies to completed, non-refusal output. A refusal carries no valid object to parse."
+            },
+            {
+              "label": "Handle the refusal as its own explicit outcome.",
+              "explanation": "Correct. Detect refusals separately, record them, and show a safe message or escalate instead of inventing data."
+            },
+            {
+              "label": "Retry with the same input until a valid object appears.",
+              "explanation": "Unbounded retries waste cost and may simply repeat the refusal. Repair attempts need a limit and a fallback."
+            }
+          ]
+        },
+        "sources": [
+          {
+            "title": "OpenAI: Structured model outputs",
+            "url": "https://platform.openai.com/docs/guides/structured-outputs"
+          },
+          {
+            "title": "Anthropic: Structured outputs",
+            "url": "https://docs.anthropic.com/en/docs/build-with-claude/structured-outputs"
+          }
+        ]
+      },
+      "practice": {
+        "kind": "scenario",
+        "title": "Design a reliable triage response",
+        "instructions": "Your service asks a model to triage incoming support tickets into category, priority and summary, and code routes each ticket from that result. Select every decision that makes the output safe to act on. Leave out choices that are unsafe or that waste effort.",
+        "explanation": "A reliable design defines a typed schema with enums, handles refusals and incomplete responses as separate outcomes, validates business rules the schema cannot express, and limits repair attempts before escalating. Prompt-only JSON, unlimited retries and trusting model-supplied values skip those controls.",
+        "options": [
+          {
+            "label": "Define a JSON Schema with required fields and a priority enum.",
+            "feedback": "Yes. A typed schema makes the contract explicit and lets the provider enforce required fields and allowed values."
+          },
+          {
+            "label": "Ask for JSON in the prompt and parse whatever text comes back.",
+            "feedback": "Prompt instructions alone do not guarantee a valid or complete object. Use schema enforcement and validate the result."
+          },
+          {
+            "label": "Detect refusals and incomplete responses before parsing.",
+            "feedback": "Yes. These outcomes contain no usable object and need their own handling paths."
+          },
+          {
+            "label": "Check that the returned category maps to an existing queue.",
+            "feedback": "Yes. Business rules live outside the schema and must be validated in code before routing."
+          },
+          {
+            "label": "Retry indefinitely until validation finally succeeds.",
+            "feedback": "Unbounded retries hide failures and grow cost. Allow a small number of repairs, then fall back or escalate."
+          },
+          {
+            "label": "After one failed repair, send the ticket to manual triage.",
+            "feedback": "Yes. A bounded repair limit with a clear fallback keeps tickets moving without trusting bad data."
+          },
+          {
+            "label": "Trust the customer ID the model includes in its answer.",
+            "feedback": "Identity comes from your authenticated request, not from generated text. A model value is a claim to verify."
+          }
+        ],
+        "correct": [
+          0,
+          2,
+          3,
+          5
+        ]
+      }
+    },
+    {
+      "id": "agents-vs-workflows",
+      "title": "When do you need an agent?",
+      "notes": {
+        "topic": "The foundations",
+        "minutes": 5,
+        "lead": "Not every model-powered feature needs an agent. The architectural choice is about who controls the next step: your code following a predefined path, or the model deciding dynamically. Pick the least autonomy that solves the problem, and add control around whatever autonomy you keep.",
+        "sections": [
+          {
+            "heading": "Workflows and agents",
+            "paragraphs": [
+              "A workflow orchestrates model calls and tools through code paths you define in advance. Extract fields, then classify, then draft a reply: the order is fixed and every branch is visible in the code. An agent lets the model choose its own next action and tool use in a loop until it decides the task is done.",
+              "Both are useful. Workflows give predictability, easy testing and consistent cost for well-defined tasks. Agents give flexibility when the number and order of steps cannot be known up front, such as investigating an unfamiliar bug across several systems."
+            ]
+          },
+          {
+            "heading": "Start with the simplest solution",
+            "paragraphs": [
+              "Many applications need neither. A single well-prompted call with retrieval and a few examples often answers the question. Each step up in autonomy usually trades extra latency, cost and unpredictability for better task performance, so the gain has to be worth it.",
+              "Ask three questions. Can you write the steps down before the request arrives? Is a wrong action expensive or irreversible? Do you need to explain exactly why the system did what it did? Yes answers point toward a workflow or a single call."
+            ]
+          },
+          {
+            "heading": "If you choose an agent, bound it",
+            "paragraphs": [
+              "An agent still runs inside your application. Your runtime decides which tools exist, validates every proposed action, enforces permissions, and stops the loop after a step or cost limit. Sensitive actions can require human approval no matter what the model proposes.",
+              "You can also mix the two: a workflow that calls a bounded agent for one open-ended step, then returns to fixed code for validation and delivery. Later modules build exactly these controls."
+            ]
+          }
+        ],
+        "flow": [
+          "Describe the task",
+          "Try a single call",
+          "Fixed steps? Use a workflow",
+          "Open-ended? Use a bounded agent",
+          "Add limits and approvals"
+        ],
+        "example": {
+          "title": "Two features at one company",
+          "steps": [
+            {
+              "label": "Invoice intake",
+              "detail": "Every invoice needs the same extraction, validation and posting steps, so the team builds a workflow with fixed stages and tests each one."
+            },
+            {
+              "label": "Incident research",
+              "detail": "An on-call helper must decide which logs, dashboards and recent deploys to inspect, which varies per incident, so an agent fits."
+            },
+            {
+              "label": "The bounds",
+              "detail": "The research agent gets read-only tools, a limit of fifteen steps, and must hand any restart or rollback to a human."
+            }
+          ]
+        },
+        "question": {
+          "prompt": "A feature always runs the same four steps in order, and a wrong step could post an incorrect payment. Which design fits best?",
+          "answer": 0,
+          "options": [
+            {
+              "label": "A deterministic workflow with validation between steps.",
+              "explanation": "Correct. The steps are known, mistakes are costly, and fixed code paths are easier to test, audit and control."
+            },
+            {
+              "label": "An autonomous agent that decides the order each time.",
+              "explanation": "Autonomy adds unpredictability without benefit when the steps never change, and it raises the risk of a wrong payment."
+            },
+            {
+              "label": "Several cooperating agents, one per step.",
+              "explanation": "Multiple agents add coordination cost and failure points to a task that a short fixed sequence already handles."
+            }
+          ]
+        },
+        "sources": [
+          {
+            "title": "Anthropic: Building effective agents",
+            "url": "https://www.anthropic.com/engineering/building-effective-agents"
+          }
+        ]
+      },
+      "practice": {
+        "kind": "scenario",
+        "title": "Choose the right level of autonomy",
+        "instructions": "Your team is planning four model-powered features: password-reset emails, invoice data extraction, a research helper for new production incidents, and an FAQ bot answering from a fixed help center. Select every architecture decision that matches the task’s uncertainty and the control it requires.",
+        "explanation": "Known, repeatable steps belong in workflows or a single grounded call, where they stay predictable and testable. Open-ended investigation can justify an agent, but only with limited tools, step limits and approval for sensitive actions. Giving agents unrestricted access, or using one where fixed code works, adds risk and cost.",
+        "options": [
+          {
+            "label": "Build invoice extraction as a fixed workflow with validation steps.",
+            "feedback": "Yes. The steps are known in advance and errors are costly, so explicit code paths give control and testability."
+          },
+          {
+            "label": "Answer FAQs with one call grounded in retrieved help articles.",
+            "feedback": "Yes. A single grounded call is the simplest solution that meets the need, with no loop to manage."
+          },
+          {
+            "label": "Let an agent decide each time how to send password-reset emails.",
+            "feedback": "Password resets follow a fixed, security-sensitive path. Model-driven control adds risk without any benefit."
+          },
+          {
+            "label": "Use a bounded agent with read-only tools for incident research.",
+            "feedback": "Yes. The investigation path varies per incident, and read-only tools limit the damage of a wrong choice."
+          },
+          {
+            "label": "Allow the incident agent to restart services without approval.",
+            "feedback": "Restarts are sensitive production actions. Require human approval instead of trusting the model’s proposal."
+          },
+          {
+            "label": "Cap the incident agent’s steps and stop when the budget is spent.",
+            "feedback": "Yes. Step and cost limits stop an agent from looping indefinitely when it cannot find an answer."
+          }
+        ],
+        "correct": [
+          0,
+          1,
+          3,
+          5
+        ]
+      }
+    }
+  ]
+}
