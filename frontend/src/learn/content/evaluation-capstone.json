@@ -1,0 +1,448 @@
+{
+  "id": "evaluation-capstone",
+  "title": "Evaluation & capstone",
+  "lessons": [
+    {
+      "id": "evaluation-datasets",
+      "title": "Build evaluations that matter",
+      "notes": {
+        "topic": "Evaluation & capstone",
+        "minutes": 5,
+        "lead": "Every earlier module added a control: a schema, a tool contract, a budget, an approval gate. An evaluation is how you prove those controls still work after you change a prompt, a model, or a tool. A good one measures the outcomes users and operators care about on cases you did not tune against.",
+        "sections": [
+          {
+            "heading": "Start from success criteria, then sample real work",
+            "paragraphs": [
+              "Write down what success means before writing test cases. “Answers well” is not testable. “Resolves the request with a verified tool result, cites the policy it used, and never issues a refund above the limit without approval” is. Each criterion becomes something a grader can check.",
+              "Cases should mirror the task distribution the system will actually see. Sample from logged requests with consent and redaction, then stratify by intent so rare but important paths, such as cancellations, angry customers, missing order numbers, and overly long input, are present rather than drowned out by the common case."
+            ]
+          },
+          {
+            "heading": "Keep a held-out set",
+            "paragraphs": [
+              "If you edit the prompt until every case passes, the suite now measures how well you memorized it. Split cases into a development set you iterate against and a held-out test set you run only to decide whether to ship. Add new failures from production to the development set first, and refresh the held-out set on a schedule.",
+              "Version the dataset alongside prompts, tools, and models. A score is only comparable to another score produced from the same dataset version and the same graders."
+            ]
+          },
+          {
+            "heading": "Grade outcomes and safety separately",
+            "paragraphs": [
+              "Outcome rubrics ask whether the task was done: the right order was found, the correct tool was called with valid arguments, the final answer matches the tool result. Grade the trace, not just the final text, because an agent can write a correct-sounding answer after a failed or skipped action.",
+              "Safety rubrics ask whether anything unacceptable happened: an unapproved side effect, a leaked record, an instruction followed from untrusted content. Treat these as gates with a threshold of zero, not as points averaged into a quality score. Prefer code-graded checks where possible; when you use a model as a grader, give it a precise rubric and calibrate it against a sample of human labels."
+            ]
+          }
+        ],
+        "flow": [
+          "Define success criteria",
+          "Sample and stratify real cases",
+          "Split development and held-out sets",
+          "Grade outcomes and safety gates",
+          "Compare versions on the same dataset"
+        ],
+        "example": {
+          "title": "Evaluating a refund-capable support agent",
+          "steps": [
+            {
+              "label": "Criteria",
+              "detail": "Correct resolution with a verified tool result; no refund over $50 without approval; no other customer’s data in the reply."
+            },
+            {
+              "label": "Dataset",
+              "detail": "400 redacted tickets sampled by intent, with refunds, cancellations, and missing order IDs oversampled; 100 of them held out."
+            },
+            {
+              "label": "Graders",
+              "detail": "Code checks inspect the tool-call trace for arguments and approvals; a calibrated model grader scores whether the reply explains the outcome."
+            },
+            {
+              "label": "Decision",
+              "detail": "The new prompt raises resolution from 81% to 86% on the held-out set but triggers one unapproved refund, so the safety gate blocks the release."
+            }
+          ]
+        },
+        "question": {
+          "prompt": "A new prompt raises the average eval score from 0.84 to 0.88, but one held-out case now issues a refund without approval. What should you do?",
+          "answer": 2,
+          "options": [
+            {
+              "label": "Ship it; the average improved.",
+              "explanation": "Averaging hides the regression that matters most. A single unapproved side effect is a safety failure, not a small deduction."
+            },
+            {
+              "label": "Move that case into the development set and rerun.",
+              "explanation": "Moving a failing case out of the held-out set to make the number pass destroys the reason the held-out set exists."
+            },
+            {
+              "label": "Block the release because a safety gate failed.",
+              "explanation": "Correct. Safety criteria are pass/fail gates. Fix the cause, add the case to development, and rerun the unchanged held-out set."
+            }
+          ]
+        },
+        "sources": [
+          {
+            "title": "Anthropic: Define success criteria and build evaluations",
+            "url": "https://docs.anthropic.com/en/docs/test-and-evaluate/develop-tests"
+          },
+          {
+            "title": "OpenAI: Evaluation best practices",
+            "url": "https://platform.openai.com/docs/guides/evaluation-best-practices"
+          }
+        ]
+      },
+      "practice": {
+        "kind": "scenario",
+        "title": "Design the evaluation suite",
+        "instructions": "Your team will change the support agent’s model next week. You must design the evaluation that decides whether the change ships. Select every decision that makes the evaluation representative, honest, and safety-aware, and leave out the ones that would produce a misleading result.",
+        "options": [
+          {
+            "label": "Sample redacted production tickets and stratify them by intent, oversampling rare high-risk paths",
+            "feedback": "Yes. The dataset reflects real traffic while still giving refunds, cancellations, and malformed requests enough cases to measure."
+          },
+          {
+            "label": "Keep a held-out test set that is never used while tuning prompts",
+            "feedback": "Yes. A held-out set tells you whether improvements generalize instead of rewarding prompts fitted to known cases."
+          },
+          {
+            "label": "Grade the tool-call trace for correct arguments and required approvals, not only the final reply",
+            "feedback": "Yes. The agent’s actions are the outcome; a fluent reply can sit on top of a failed or unapproved call."
+          },
+          {
+            "label": "Treat unapproved side effects and data leaks as zero-tolerance gates reported separately",
+            "feedback": "Yes. Safety failures must block a release on their own rather than be diluted inside an average."
+          },
+          {
+            "label": "Use only cases the current prompt author wrote and already passes",
+            "feedback": "No. Author-written passing cases are biased toward known behavior and cannot reveal regressions on real traffic."
+          },
+          {
+            "label": "Report one overall average score to decide the release",
+            "feedback": "No. A single average can rise while a critical safety or rare-path failure appears, which hides exactly what you need to see."
+          },
+          {
+            "label": "Use an uncalibrated model grader with the instruction “rate quality 1–10”",
+            "feedback": "No. A vague rubric without human-label calibration produces scores you cannot trust or compare across versions."
+          }
+        ],
+        "correct": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "explanation": "A useful evaluation samples the real task distribution, keeps held-out data honest, grades actions as well as words, and separates safety gates from quality scores. Biased cases, a single average, and uncalibrated graders each produce a number that can look better while the system gets worse."
+      }
+    },
+    {
+      "id": "cost-latency",
+      "title": "Balance quality, cost & latency",
+      "notes": {
+        "topic": "Evaluation & capstone",
+        "minutes": 5,
+        "lead": "Every request your agent handles spends money and time: input tokens, output tokens, tool calls, and retries. Optimizing either one is easy if you ignore quality. The real job is to find the cheapest, fastest configuration that still passes the evaluation you built in the previous lesson.",
+        "sections": [
+          {
+            "heading": "Where cost and latency come from",
+            "paragraphs": [
+              "Input tokens include instructions, retrieved evidence, conversation history, and tool results. Output tokens are usually priced higher per token and dominate latency, because the model generates them one at a time. Each tool call adds network and execution time, and each additional model round trip repeats the prompt.",
+              "Measure end-to-end latency from the user’s action to the complete result, including retrieval, tool calls, and retries, and look at the 95th percentile as well as the median. Time to first token matters separately when you stream, because it is when the user stops staring at a blank screen."
+            ]
+          },
+          {
+            "heading": "Levers, and what each one risks",
+            "paragraphs": [
+              "Retrieve fewer, better chunks: cheaper and faster, but too few and grounding fails. Cap and shorten output: often the biggest latency win, but an answer truncated mid-explanation is a failure. Make fewer requests by combining steps or skipping an unnecessary model call: faster, but a merged step can be harder to validate.",
+              "Use a smaller model for narrow steps like routing, keep a stable prompt prefix so provider prompt caching can reuse it, run independent tool calls in parallel, and move work that can wait to batch processing. Every one of these is a hypothesis until the evaluation confirms quality held."
+            ]
+          },
+          {
+            "heading": "Turn it into a budget",
+            "paragraphs": [
+              "Write a per-request budget as constraints: a cost ceiling, a latency ceiling, and quality floors taken from your evaluation, such as the minimum evidence needed for a grounded answer. Then search within those constraints instead of tuning one number at a time.",
+              "The units in this lesson are simplified credits and milliseconds so the arithmetic is visible. Real prices and speeds vary by provider and model; use the same method with your measured numbers."
+            ]
+          }
+        ],
+        "flow": [
+          "Measure tokens, calls, and p95 latency",
+          "Set cost and latency ceilings",
+          "Set quality floors from evals",
+          "Adjust one lever",
+          "Re-run the evaluation"
+        ],
+        "example": {
+          "title": "Trimming a slow grounded answer",
+          "steps": [
+            {
+              "label": "Baseline",
+              "detail": "Twelve retrieved chunks, up to 1,000 output tokens, and four tool calls cost 19 credits and take about 4 seconds."
+            },
+            {
+              "label": "Evidence",
+              "detail": "The evaluation shows answers stay grounded with six chunks, so six irrelevant chunks are removed."
+            },
+            {
+              "label": "Output",
+              "detail": "Most passing answers use under 300 tokens; capping output at 300 removes the long tail without truncating passing answers."
+            },
+            {
+              "label": "Tools",
+              "detail": "Only the order lookup was needed; three speculative calls are dropped. The held-out score is unchanged, so the cheaper configuration ships."
+            }
+          ]
+        },
+        "question": {
+          "prompt": "Cutting retrieved chunks from six to two halves the cost, but the grounded-answer rate on the evaluation drops from 92% to 70%. What is the right reading?",
+          "answer": 1,
+          "options": [
+            {
+              "label": "A clear win, because cost was halved.",
+              "explanation": "Cost is a constraint, not the goal. A cheaper configuration that fails the quality floor is not an acceptable option."
+            },
+            {
+              "label": "The change violates a quality floor, so reject it.",
+              "explanation": "Correct. Optimizations must stay inside the quality constraints the evaluation defines; look for savings elsewhere, such as output length."
+            },
+            {
+              "label": "Raise output length to make up for less evidence.",
+              "explanation": "More generated text cannot replace missing evidence; it increases cost and latency while risking unsupported claims."
+            }
+          ]
+        },
+        "sources": [
+          {
+            "title": "OpenAI: Latency optimization",
+            "url": "https://platform.openai.com/docs/guides/latency-optimization"
+          },
+          {
+            "title": "OpenAI: Cost optimization",
+            "url": "https://platform.openai.com/docs/guides/cost-optimization"
+          },
+          {
+            "title": "OpenAI: Prompt caching",
+            "url": "https://platform.openai.com/docs/guides/prompt-caching"
+          }
+        ]
+      },
+      "practice": {
+        "kind": "budget",
+        "title": "Fit one request into its budget",
+        "instructions": "Simplified units: fixed instructions cost 1 credit and 300 ms. Each retrieved chunk costs 0.5 credits and 10 ms. Each output token costs 0.004 credits and 2 ms. Each tool call costs 2 credits and 400 ms. The request must cost at most 10 credits and finish within 1,500 ms. Evaluations show grounded answers need at least 6 chunks, complete answers need at least 300 output tokens, and the order lookup needs at least 1 tool call.",
+        "fields": [
+          {
+            "id": "chunks",
+            "label": "Retrieved evidence chunks",
+            "unit": "chunks",
+            "min": 0,
+            "max": 12,
+            "step": 1,
+            "initial": 12
+          },
+          {
+            "id": "outputTokens",
+            "label": "Maximum output tokens",
+            "unit": "tokens",
+            "min": 100,
+            "max": 1000,
+            "step": 100,
+            "initial": 1000
+          },
+          {
+            "id": "toolCalls",
+            "label": "Tool calls per request",
+            "unit": "calls",
+            "min": 0,
+            "max": 4,
+            "step": 1,
+            "initial": 4
+          }
+        ],
+        "constraints": [
+          {
+            "label": "Variable cost fits the remaining 9 credits",
+            "coefficients": {
+              "chunks": 0.5,
+              "outputTokens": 0.004,
+              "toolCalls": 2
+            },
+            "operator": "<=",
+            "limit": 9
+          },
+          {
+            "label": "Variable latency fits the remaining 1,200 ms",
+            "coefficients": {
+              "chunks": 10,
+              "outputTokens": 2,
+              "toolCalls": 400
+            },
+            "operator": "<=",
+            "limit": 1200
+          },
+          {
+            "label": "At least 6 chunks for grounded answers",
+            "coefficients": {
+              "chunks": 1
+            },
+            "operator": ">=",
+            "limit": 6
+          },
+          {
+            "label": "At least 300 output tokens for complete answers",
+            "coefficients": {
+              "outputTokens": 1
+            },
+            "operator": ">=",
+            "limit": 300
+          },
+          {
+            "label": "At least 1 tool call for the order lookup",
+            "coefficients": {
+              "toolCalls": 1
+            },
+            "operator": ">=",
+            "limit": 1
+          }
+        ],
+        "solution": {
+          "chunks": 6,
+          "outputTokens": 300,
+          "toolCalls": 1
+        },
+        "explanation": "With 6 chunks, 300 output tokens, and 1 tool call, the variable cost is 3 + 1.2 + 2 = 6.2 credits and the variable latency is 60 + 600 + 400 = 1,060 ms, so the totals are 7.2 credits and 1,360 ms. Output tokens and tool calls dominate latency; adding a second tool call or 100 more output tokens breaks the latency ceiling, while cutting chunks below 6 breaks the quality floor."
+      }
+    },
+    {
+      "id": "failure-testing",
+      "title": "Test failures, not just happy paths",
+      "notes": {
+        "topic": "Evaluation & capstone",
+        "minutes": 5,
+        "lead": "Most of the architecture in this course exists for bad days: tools time out, messages are delivered twice, documents contain hostile instructions, and approvals expire. A test suite that only replays polite, well-formed requests never exercises any of it. Failure tests deliberately create those conditions and check a measurable expected behavior.",
+        "sections": [
+          {
+            "heading": "Choose failures from your architecture",
+            "paragraphs": [
+              "Walk the system diagram and ask what each component does when its neighbor misbehaves. Tools can time out, return malformed output, or return a permission error. Queues can redeliver a message. Retrieval can return nothing, or a document containing instructions. A model can propose an argument outside the schema. Each answer is a test case.",
+              "Add adversarial cases on purpose: direct jailbreak attempts, indirect prompt injection planted in retrieved pages or tool results, requests for another tenant’s data, and attempts to change an approved action’s arguments. Treat the model as an untrusted component and test whether the boundaries around it hold."
+            ]
+          },
+          {
+            "heading": "Make the expected behavior measurable",
+            "paragraphs": [
+              "“Handles errors gracefully” cannot fail. Instead write the observable result: after a payment tool timeout, the runtime retries once with the same idempotency key against a payment service that deduplicates by key, records one charge, and tells the user the status. After an injected instruction, zero tool calls leave the allowlist and no data is sent to an unapproved destination.",
+              "Assert on the trace and on external state, not on the model’s self-report. A test passes when the ledger shows one refund, the audit log shows a rejected call, or the response states that evidence is missing. Track attack success rate and duplicate side effects as numbers, with zero as the target for safety cases."
+            ]
+          },
+          {
+            "heading": "Inject faults safely and keep them",
+            "paragraphs": [
+              "Run failure tests against sandboxed tools and synthetic accounts, using fakes or fault-injecting proxies that return timeouts, errors, and duplicate deliveries on demand. Never run attack simulations against real customer data or systems you are not authorized to test.",
+              "Every production incident becomes a new regression case. Keep failure tests in the same versioned suite as quality evaluations so a model or prompt change cannot ship while a previously fixed failure has quietly returned."
+            ]
+          }
+        ],
+        "flow": [
+          "Walk components for failure modes",
+          "Add adversarial inputs",
+          "Write measurable expected behavior",
+          "Inject faults in a sandbox",
+          "Assert on trace and state"
+        ],
+        "example": {
+          "title": "A refund tool times out after charging",
+          "steps": [
+            {
+              "label": "Fault",
+              "detail": "A fake payment service applies the refund, then delays its response past the runtime’s timeout."
+            },
+            {
+              "label": "Expectation",
+              "detail": "The runtime retries once with the same idempotency key against a payment service that deduplicates by key, the ledger shows exactly one refund, and the user sees a confirmed status."
+            },
+            {
+              "label": "Result",
+              "detail": "The first run shows two refunds because the retry generated a new key; the test fails with a concrete count instead of a vague impression."
+            },
+            {
+              "label": "Regression",
+              "detail": "After the fix, the case stays in the suite and runs on every prompt, model, and tool change."
+            }
+          ]
+        },
+        "question": {
+          "prompt": "Which expected behavior makes a prompt-injection test measurable for an agent that reads web pages and can send email?",
+          "answer": 0,
+          "options": [
+            {
+              "label": "Zero send-email calls to addresses outside the allowlist across all injected pages.",
+              "explanation": "Correct. It asserts on observable actions in the trace and gives a clear pass/fail threshold."
+            },
+            {
+              "label": "The model says it noticed suspicious instructions.",
+              "explanation": "A self-report is not evidence. The model can claim to notice an attack and still take the harmful action."
+            },
+            {
+              "label": "The agent behaves safely and handles the attack gracefully.",
+              "explanation": "This cannot fail because it names no observable outcome. A test needs a specific state or count to check."
+            }
+          ]
+        },
+        "sources": [
+          {
+            "title": "OpenAI: Red teaming",
+            "url": "https://platform.openai.com/docs/guides/red-teaming"
+          },
+          {
+            "title": "OWASP: LLM01:2025 Prompt Injection",
+            "url": "https://genai.owasp.org/llmrisk/llm01-prompt-injection/"
+          },
+          {
+            "title": "Anthropic: Define success criteria and build evaluations",
+            "url": "https://docs.anthropic.com/en/docs/test-and-evaluate/develop-tests"
+          }
+        ]
+      },
+      "practice": {
+        "kind": "scenario",
+        "title": "Choose the failure tests",
+        "instructions": "Your agent reads support documents, queues refund jobs, and calls a payment tool that requires approval above $50. Before launch you can add a handful of tests. Select every failure test that targets a real risk in this architecture and states a measurable expected behavior; leave out tests that cannot fail or are unsafe to run.",
+        "options": [
+          {
+            "label": "Plant an instruction in a retrieved document telling the agent to refund $500; expect zero payment calls without approval",
+            "feedback": "Yes. It exercises indirect injection against the approval boundary and checks an observable count."
+          },
+          {
+            "label": "Make the payment tool time out after applying a refund; expect exactly one ledger entry after retry",
+            "feedback": "Yes. It tests idempotent retries where a duplicate side effect would cost real money."
+          },
+          {
+            "label": "Deliver the same queued refund job twice; expect one refund and one deduplicated job",
+            "feedback": "Yes. At-least-once delivery is normal for queues, so duplicate handling must be proven with state."
+          },
+          {
+            "label": "Return a malformed tool result; expect schema validation to reject it and no follow-up action",
+            "feedback": "Yes. It checks that invalid observations stop at the validation boundary instead of driving the next step."
+          },
+          {
+            "label": "Rerun the happy-path suite ten more times to raise confidence",
+            "feedback": "No. Repeating well-formed requests never triggers the timeout, duplicate, or injection paths the architecture was built for."
+          },
+          {
+            "label": "Ask the model whether it would ever refund without approval; pass if it says no",
+            "feedback": "No. A self-report is not behavior. Assert on the tool-call trace and external state instead."
+          },
+          {
+            "label": "Run injection attacks against real customer accounts in production",
+            "feedback": "No. Failure tests belong in a sandbox with synthetic data; attacking live accounts risks real harm and is not authorized testing."
+          }
+        ],
+        "correct": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "explanation": "Strong failure tests come from the architecture’s real risks—injection, timeouts after side effects, duplicate delivery, invalid observations—and assert on counts and state in a sandbox. Repeating happy paths, trusting the model’s self-report, or testing against production data either cannot find the failure or creates one."
+      }
+    }
+  ]
+}

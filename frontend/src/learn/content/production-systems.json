@@ -1,0 +1,383 @@
+{
+  "id": "production-systems",
+  "title": "Production systems",
+  "lessons": [
+    {
+      "id": "production",
+      "title": "Queue work & retry safely",
+      "notes": {
+        "topic": "Production systems",
+        "minutes": 4,
+        "lead": "An agent run may need several model calls, a slow tool, or a human decision. Instead of holding the user’s connection open, accept the work durably, give the user a task ID, and let a worker execute it within limits.",
+        "sections": [
+          {
+            "heading": "Put policy before the queue",
+            "paragraphs": [
+              "At intake, authenticate the caller, check that they may request the task, and apply rate limits. Before returning a task ID, save the job and its pending enqueue record together so a crash cannot leave an accepted job with no way onto the queue. Publish the job ID without credentials. The status endpoint must check permission to read that specific job; knowing its ID does not grant access.",
+              "The queue buffers bursts so a bounded pool of workers can process jobs at a controlled rate. It does not grant authority. Before a protected action, the worker checks that the saved actor and tenant still have permission and that any required approval is valid. A job may have waited long enough for access or approval to expire."
+            ]
+          },
+          {
+            "heading": "Design for duplicate delivery",
+            "paragraphs": [
+              "With at-least-once delivery, a worker can finish an action and crash before acknowledging the message. Another worker can receive the same job. Save progress before acknowledging; when a redelivery finds a completed job, it returns the saved result instead of running the whole agent again.",
+              "A job record alone cannot tell you whether an external write succeeded just before a crash. Give each logical write a stable idempotency key and reuse it with the same arguments across attempts. The tool service must enforce deduplication; if it cannot, reconcile uncertain outcomes before sending another write."
+            ]
+          },
+          {
+            "heading": "Retry only when it can help",
+            "paragraphs": [
+              "Retry transient failures with exponential backoff with jitter (increasing delays plus some randomness), a maximum attempt count, and an overall deadline. Do not retry invalid inputs or authorization denials unchanged. Route exhausted jobs to an operator-visible failure path such as a dead-letter queue, where failed messages can be inspected rather than retried forever.",
+              "Record queue wait, attempt count, and outcome using a correlation ID that follows the job. Rising wait time with stable execution time points toward a backlog; rising tool error rates with normal wait time point toward a dependency. Keep prompts, credentials, and customer records out of these signals."
+            ]
+          }
+        ],
+        "flow": ["Authenticate and authorize", "Accept and queue the job", "Claim and check permissions", "Run with limits", "Store outcome and acknowledge"],
+        "example": {
+          "title": "One approved refund, two deliveries",
+          "steps": [
+            {
+              "label": "Accept",
+              "detail": "The gateway authorizes a refund review and returns a task ID. The worker obtains approval for the exact amount before it can issue the refund."
+            },
+            {
+              "label": "Lose the response",
+              "detail": "The refund provider accepts the write, but the worker loses its connection before storing the outcome. The queue eventually delivers the job again."
+            },
+            {
+              "label": "Recover safely",
+              "detail": "The next worker recovers the result using the original idempotency key. The idempotent provider returns the existing refund, and the worker saves that outcome and acknowledges the job."
+            }
+          ]
+        },
+        "question": {
+          "prompt": "The refund provider times out after receiving a write. It supports idempotency for the original key, and the write is still authorized. What is safe?",
+          "answer": 1,
+          "options": [
+            {
+              "label": "Retry with a new key.",
+              "explanation": "A new key describes a new operation to the provider, even if the amount and order are unchanged."
+            },
+            {
+              "label": "Retry the same write with the same key within the retry budget.",
+              "explanation": "The timeout is ambiguous. The same key lets the provider recognize an operation it may already have applied."
+            },
+            {
+              "label": "Mark the refund failed and invite the user to send a new request.",
+              "explanation": "A lost response does not prove failure. A new request could duplicate a refund that already happened."
+            }
+          ]
+        },
+        "sources": [
+          {
+            "title": "Amazon SQS: At-least-once delivery",
+            "url": "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/standard-queues-at-least-once-delivery.html"
+          },
+          {
+            "title": "Amazon Builders’ Library: Making retries safe with idempotent APIs",
+            "url": "https://aws.amazon.com/builders-library/making-retries-safe-with-idempotent-APIs/"
+          },
+          {
+            "title": "Amazon SQS: Using dead-letter queues",
+            "url": "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-dead-letter-queues.html"
+          }
+        ]
+      },
+      "practice": {
+        "kind": "graph",
+        "labId": "production",
+        "title": "Put authenticated work on a queue",
+        "instructions": "Start with the approved-action architecture. Replace the direct path from the policy gateway to the runtime with queued work, and connect the runtime to Trace & evals. Keep the existing grounding, memory, and approval paths. Check the graph and step through the simulated refund. Find where the runtime handles duplicate delivery and where a user learns the outcome.",
+        "explanation": "The queue belongs after the policy gateway and before the runtime. Telemetry observes the runtime; it does not authorize writes. The simulation shows the design, but real workers and tool APIs must enforce retry limits, approvals, and idempotency."
+      }
+    },
+    {
+      "id": "durable-state",
+      "title": "Checkpoint, resume & cancel",
+      "notes": {
+        "topic": "Production systems",
+        "minutes": 4,
+        "lead": "A queue can deliver a job again, but it cannot tell the next worker which parts are already done. A checkpoint is a durable record of the next safe step and the information needed to take it.",
+        "sections": [
+          {
+            "heading": "Save decisions the next worker needs",
+            "paragraphs": [
+              "Checkpoint at work boundaries: after a model decision, before pausing for approval, and after a tool result. Store the run and step IDs, status, release or state version, and references to the plan, result, and approval. Persist remaining limits or the original deadline so a restart does not reset the budget. Save only the data needed to continue.",
+              "Some workflow engines rebuild state from an event history instead of loading a single record. The same rule applies: reuse recorded results. Do not call the model again to reconstruct a decision that has already been made, especially if a person approved that exact decision."
+            ]
+          },
+          {
+            "heading": "Separate intent from confirmed effect",
+            "paragraphs": [
+              "Before an irreversible tool call, persist the exact action, scoped approval, idempotency key, and dispatch state. Make the transition that permits dispatch conditional on no cancellation having won and the required checks still passing. Once the provider confirms the write, persist its receipt and the next state. Do not mark a write complete just because it was scheduled.",
+              "A crash can land between the provider applying the write and your checkpoint recording the receipt. On resume, check the provider for the original operation or use its documented idempotent recovery procedure where appropriate. If the outcome cannot be determined, stop and escalate instead of sending a new write or claiming the first one failed."
+            ]
+          },
+          {
+            "heading": "Cancellation stops future work",
+            "paragraphs": [
+              "Treat cancellation as a durable request, not a button that kills a process. Workers check it at safe boundaries and interrupt operations that support cancellation. A cancel that wins before the dispatch gate prevents the write. Once dispatch wins, the call may still finish even if the user has asked to stop.",
+              "Show cancellation as pending while a write is in flight or its outcome is unknown. If it committed, report the effect and stop remaining work. Undoing that effect, if possible, is a separate compensating action that needs its own permission; a cancel signal does not undo a refund."
+            ]
+          }
+        ],
+        "flow": ["Save next safe step", "Reload checkpoint on resume", "Gate irreversible dispatch", "Reconcile uncertain writes", "Persist final outcome"],
+        "example": {
+          "title": "Cancellation arrives during a refund",
+          "steps": [
+            {
+              "label": "Checkpoint intent",
+              "detail": "The worker saves the approved refund and its idempotency key. It wins the dispatch transition before a cancellation request has been recorded."
+            },
+            {
+              "label": "Resume after a crash",
+              "detail": "The worker crashes without saving a receipt, and the user asks to cancel. A replacement finds both the dispatch marker and the cancellation request. It makes no new refund."
+            },
+            {
+              "label": "Report what happened",
+              "detail": "A read-only provider lookup finds that the refund was issued. The worker records the receipt and stops follow-up work. The status says the refund went through, not that it was canceled."
+            }
+          ]
+        },
+        "question": {
+          "prompt": "A run resumes with a dispatch marker and no refund receipt. A cancel request is recorded. What should the worker do first?",
+          "answer": 2,
+          "options": [
+            {
+              "label": "Mark the entire job canceled immediately.",
+              "explanation": "A dispatch marker means the refund might already have happened. The missing receipt does not prove otherwise."
+            },
+            {
+              "label": "Restart the agent loop to decide on a refund again.",
+              "explanation": "The checkpoint already captured the approved decision. Restarting can change that decision or duplicate the effect."
+            },
+            {
+              "label": "Look up the original operation without initiating another write.",
+              "explanation": "Reconcile the uncertain effect before reporting a terminal outcome. Do not start a fresh write after cancellation."
+            }
+          ]
+        },
+        "sources": [
+          {
+            "title": "Microsoft Durable Task: Orchestration history and replay",
+            "url": "https://learn.microsoft.com/en-us/azure/durable-task/common/durable-task-orchestrations"
+          },
+          {
+            "title": "Temporal TypeScript SDK: Canceling workflows and activities",
+            "url": "https://docs.temporal.io/develop/typescript/workflows/cancellation"
+          }
+        ]
+      },
+      "practice": {
+        "kind": "sequence",
+        "title": "Recover a refund at the crash boundary",
+        "instructions": "Order this run from approved intent to final status. The worker dispatches the refund, crashes before saving the receipt, and a cancel request arrives during the outage. The provider has a read-only lookup by idempotency key and reports that the refund committed.",
+        "items": [
+          { "id": "reconcile", "label": "Look up the dispatched operation by its original key without issuing a new refund." },
+          { "id": "dispatch", "label": "Pass the checks and cancellation gate, mark dispatch, and submit the saved write." },
+          { "id": "report", "label": "Save the confirmed receipt, stop follow-up work, and report that the refund went through." },
+          { "id": "prepare", "label": "Checkpoint the exact approved write and its stable idempotency key before calling the provider." },
+          { "id": "resume", "label": "After the crash, reload the dispatch checkpoint and notice the recorded cancel request." }
+        ],
+        "correctOrder": ["prepare", "dispatch", "resume", "reconcile", "report"],
+        "explanation": "Save intent before dispatch so the next worker knows what to look up. On resume, the cancellation stops any fresh write, not the read-only check needed to tell the user whether the original refund went through."
+      }
+    },
+    {
+      "id": "observability",
+      "title": "Trace the system without leaking data",
+      "notes": {
+        "topic": "Production systems",
+        "minutes": 4,
+        "lead": "When an agent run is slow, the final response can’t tell you whether it waited in the queue, spent time generating text, or retried a tool. You need signals that connect those steps without making a second copy of the user’s conversation.",
+        "sections": [
+          {
+            "heading": "Use the signal that answers the question",
+            "paragraphs": [
+              "Metrics show patterns across runs: queue wait percentiles, model token usage, tool error rates, and completion rates. Use a small set of labels such as release version and outcome category. Leave task IDs out of metric labels: a unique label per job creates a new time series per job instead of a stable aggregate.",
+              "A trace connects spans, which are timed operations such as queue publish, retrieval, model generation, or a tool attempt. Propagate trace context across services, including message metadata, so the worker’s trace can connect to intake. Use an opaque run ID to link structured events across retries and long approval waits. Neither ID is a credential or permission to look up the job."
+            ]
+          },
+          {
+            "heading": "Decide what never gets collected",
+            "paragraphs": [
+              "Allowlist fields at instrumentation: duration, attempt number, tool name, approved status and error categories, model or release version, and token counts. Do not collect raw prompts, retrieved text, tool arguments, secrets, or customer records by default. Error messages and automatic instrumentation can leak the same data, so sanitize those paths and test the fields that actually reach the exporter.",
+              "A collector can remove unexpected attributes before forwarding telemetry, but that is a second line of defense, not a reason to capture everything. Restrict access to the telemetry store. Retain detailed traces only as long as operators need them, then expire them automatically. Keep longer-lived aggregates only if they exclude identifying or sensitive fields."
+            ]
+          }
+        ],
+        "flow": ["Carry opaque correlation context", "Record allowlisted signals", "Filter before export", "Restrict access", "Expire detailed records"],
+        "example": {
+          "title": "Find the source of slow refunds",
+          "steps": [
+            {
+              "label": "Spot the pattern",
+              "detail": "End-to-end latency rises while model latency stays flat. A queue-wait histogram shows that most of the increase happens before the worker begins."
+            },
+            {
+              "label": "Inspect a trace",
+              "detail": "A redacted trace shows a long queue wait, a short model span, and one successful tool call. The run ID connects it to scheduling events without exposing the order or prompt."
+            },
+            {
+              "label": "Keep only what helps",
+              "detail": "This team keeps restricted traces for seven days and aggregate latency metrics for thirty. The raw refund payload is never sent to the telemetry backend."
+            }
+          ]
+        },
+        "question": {
+          "prompt": "Which design lets you connect an intake event to a worker retry without copying refund arguments into telemetry?",
+          "answer": 0,
+          "options": [
+            {
+              "label": "Propagate trace context and log the run ID, attempt number, and error category.",
+              "explanation": "Opaque correlation and bounded status fields connect the steps without exposing refund arguments or allocating per-run metric series."
+            },
+            {
+              "label": "Save the raw tool request for retries only.",
+              "explanation": "A retry still carries sensitive customer and transaction data. The error category and attempt number are enough to count retries."
+            },
+            {
+              "label": "Add the customer’s email to every metric label.",
+              "explanation": "This exposes personal data, creates many time series, and still does not distinguish individual attempts reliably."
+            }
+          ]
+        },
+        "sources": [
+          {
+            "title": "OpenTelemetry: Traces and context propagation",
+            "url": "https://opentelemetry.io/docs/concepts/signals/traces/"
+          },
+          {
+            "title": "OpenTelemetry: Handling sensitive data",
+            "url": "https://opentelemetry.io/docs/security/handling-sensitive-data/"
+          }
+        ]
+      },
+      "practice": {
+        "kind": "scenario",
+        "title": "Instrument a slow refund workflow",
+        "instructions": "Support needs to distinguish queue delay from tool retries across services. Refund requests include private order data. Select every decision that helps diagnose the incident without sending that data to the telemetry backend.",
+        "options": [
+          {
+            "label": "Carry trace context on the queued job and include an opaque run ID in structured events.",
+            "feedback": "This links intake, worker attempts, and status events without using customer details to join the records."
+          },
+          {
+            "label": "Keep raw tool arguments only on failed spans, and let retention clean them up.",
+            "feedback": "Short retention does not prevent exposure at collection time. Use a sanitized error category, duration, and attempt number."
+          },
+          {
+            "label": "Measure queue wait and tool duration separately with low-cardinality labels.",
+            "feedback": "Separate distributions show where time goes across many runs. Stable labels, such as tool name or outcome, keep metrics useful."
+          },
+          {
+            "label": "Hash every customer email and use the hash as a metric label.",
+            "feedback": "A stable hash can still identify or link a person, and a label per customer still multiplies metric series."
+          },
+          {
+            "label": "Allowlist fields before export, restrict trace access, and enforce a retention limit.",
+            "feedback": "Minimization reduces what can leak, and access limits and expiry reduce exposure for data the team still needs."
+          }
+        ],
+        "correct": [0, 2, 4],
+        "explanation": "Correlate individual runs with traces and structured events, then use low-cardinality metrics for trends. Prevent payload capture up front and apply access and retention controls to the remaining telemetry."
+      }
+    },
+    {
+      "id": "deployment",
+      "title": "Ship, version & roll back",
+      "notes": {
+        "topic": "Production systems",
+        "minutes": 4,
+        "lead": "Changing a prompt, model, or tool schema can change what an agent does even when its application code is unchanged. Treat those changes as releases, and plan what happens to jobs that are still queued or paused when the release changes.",
+        "sections": [
+          {
+            "heading": "Record what each run is using",
+            "paragraphs": [
+              "Give each release an ID and record the prompt revision, provider model snapshot when one is available, tool contract and implementation versions, and checkpoint schema version. Save the release ID on each run and carry it into telemetry. Versioning records the configuration; it does not guarantee identical model output on every call.",
+              "Route retries and resumptions to compatible workers. Use the saved release for a paused job unless an explicit, tested migration changes it. If migration changes a proposed action or what an argument means, repeat the policy and approval checks rather than carrying the old approval forward."
+            ]
+          },
+          {
+            "heading": "Check a small release against the current one",
+            "paragraphs": [
+              "Start with offline evaluations, including stored-state compatibility and tests that denied actions stay denied. Then send a small cohort of new jobs to the candidate. Compare that canary with jobs on the current version at the same time; a traffic spike or tool outage might affect both. Wait long enough to see real completions, not just successful enqueue responses.",
+              "Define pass and stop criteria first: task quality, unauthorized writes, tool errors, latency, and cost. A confirmed unsafe write can halt the rollout immediately; noisy performance changes need enough observations to interpret. Increase exposure in stages only when the agreed checks pass."
+            ]
+          },
+          {
+            "heading": "A rollback must also work on data",
+            "paragraphs": [
+              "Use backward-compatible changes first: add a new field while keeping the old one readable, fill it in, and delay removing the old field until the old workers and rollback window are gone. Test that the old release can still process its own jobs after the schema change.",
+              "If the canary fails, route new jobs back to the known-good release and stop unsafe operations. Drain compatible in-flight jobs or pause and reconcile them under an explicit recovery plan. Reverting a traffic flag does not undo external writes or make a new-only checkpoint readable by old code."
+            ]
+          }
+        ],
+        "flow": ["Pin the release configuration", "Test state and behavior", "Canary new jobs", "Compare with current release", "Expand or roll back"],
+        "example": {
+          "title": "Release a new refund recommendation flow",
+          "steps": [
+            {
+              "label": "Prepare both versions",
+              "detail": "Release B uses a new prompt and adds a checkpoint field for an evidence reference. The field is optional in storage, and release A can still read its own checkpoints."
+            },
+            {
+              "label": "Compare real outcomes",
+              "detail": "After offline checks, route five percent of new jobs to B. Before expanding, sampled outcomes show that B misses required evidence more often than the stop threshold allows."
+            },
+            {
+              "label": "Roll back intake",
+              "detail": "Send new jobs to A again and pause affected B runs for review. A keeps processing its own jobs, and operators reconcile anything B already sent to a tool."
+            }
+          ]
+        },
+        "question": {
+          "prompt": "A canary fails while a candidate job is paused on a checkpoint the old worker cannot read. What is the safe rollback?",
+          "answer": 1,
+          "options": [
+            {
+              "label": "Send every queued and paused job to the old worker.",
+              "explanation": "The old worker cannot safely interpret candidate state; retrying it there could discard progress or repeat a write."
+            },
+            {
+              "label": "Revert new-job routing and handle candidate jobs through a compatible recovery path.",
+              "explanation": "This limits exposure without silently handing unreadable state to the older version. Any prior writes still need reconciliation."
+            },
+            {
+              "label": "Delete candidate checkpoints and regenerate each plan.",
+              "explanation": "A fresh plan loses the link to earlier approvals and tool outcomes and can repeat an irreversible action."
+            }
+          ]
+        },
+        "sources": [
+          {
+            "title": "Google SRE Workbook: Canarying releases",
+            "url": "https://sre.google/workbook/canarying-releases/"
+          },
+          {
+            "title": "OpenAI: Text generation and pinning model snapshots",
+            "url": "https://developers.openai.com/api/docs/guides/text#prompt-engineering"
+          },
+          {
+            "title": "Prisma: Expand-and-contract migrations",
+            "url": "https://docs.prisma.io/docs/guides/database/data-migration"
+          }
+        ]
+      },
+      "practice": {
+        "kind": "sequence",
+        "title": "Roll out without stranding queued jobs",
+        "instructions": "Order the stages for a successful rollout. The candidate introduces a checkpoint field and changes the prompt and tool contract. The team requires the compatible schema and rollback drill to pass before any production traffic. Keep old state support until the rollout and rollback window are over.",
+        "items": [
+          { "id": "expand", "label": "After the canary meets its thresholds, expand exposure in stages and monitor each stage." },
+          { "id": "verify", "label": "Once the release is pinned, add compatible state support and pass offline checks and a rollback drill." },
+          { "id": "retire", "label": "After the rollback window closes and no jobs need old state, retire the old format." },
+          { "id": "pin", "label": "Record the candidate prompt, model, tool versions, and state schema as one release." },
+          { "id": "canary", "label": "After verification, route a small cohort of new jobs to the candidate and compare completed outcomes." }
+        ],
+        "correctOrder": ["pin", "verify", "canary", "expand", "retire"],
+        "explanation": "Pin and verify before admitting real work. Compare completed canary runs with the current release before expanding. Delay removing old state support so the rollback remains usable while old jobs still exist."
+      }
+    }
+  ]
+}

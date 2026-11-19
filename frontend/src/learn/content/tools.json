@@ -1,0 +1,244 @@
+{
+  "id": "tools",
+  "title": "Tools & integrations",
+  "lessons": [
+    {
+      "id": "tool-contracts",
+      "title": "Design a tool contract",
+      "notes": {
+        "topic": "Tools & integrations",
+        "minutes": 4,
+        "lead": "A tool contract tells the model what it can propose and tells the application what it can safely execute. A name and description help the model choose; the handler still has to check the request and enforce the rules.",
+        "sections": [
+          {
+            "heading": "Give each tool one job",
+            "paragraphs": [
+              "Prefer narrow operations such as check_availability and place_hold to a general tool that accepts any library command. Give each operation a description that says when to use it and whether it changes anything. Use a schema to require named fields, constrain types and formats, and reject unknown fields. Passing a schema check proves that a request has the right shape, not that its values make sense.",
+              "Specify what comes back, too. A successful hold can return a hold ID and an expiry timestamp. A failed request should return an explicit, machine-readable reason, such as ITEM_UNAVAILABLE, instead of an encouraging sentence the model might mistake for success. Validate the result and return only fields needed for the task."
+            ]
+          },
+          {
+            "heading": "Keep authority and effects explicit",
+            "paragraphs": [
+              "The application gets the caller’s identity from the authenticated session, not from a model argument. Before execution, check both permission to use the tool and permission to act on the particular resource. The service that owns the data should enforce access when the request reaches it, using credentials scoped to the needed operation.",
+              "Label a lookup as read-only and a hold as a write. For the write, state what changes, when it counts as complete, and how duplicate requests behave. An idempotency key is a stable identifier for one intended action. If the service supports it, retries of the same action with the same key must not create a second hold; reusing the key with different arguments should be rejected."
+            ]
+          }
+        ],
+        "flow": ["Describe the operation", "Validate the proposal", "Authorize the caller", "Execute under the contract", "Return a typed result"],
+        "example": {
+          "title": "Place a hold on a library kit",
+          "steps": [
+            { "label": "Define the proposal", "detail": "The model may propose place_hold with a nonempty kit ID and branch ID. Both are required strings; a member ID is not an accepted argument." },
+            { "label": "Check the write", "detail": "The handler resolves the signed-in member, checks they can place holds at that branch, and verifies the kit is eligible. It attaches a key that stays the same across attempts to place this one hold." },
+            { "label": "Return the outcome", "detail": "A committed hold returns its ID and expiry. If the kit becomes unavailable before commit, return ITEM_UNAVAILABLE without a hold ID. The assistant may confirm a reservation only in the first case." }
+          ]
+        },
+        "question": {
+          "prompt": "A hold proposal passes schema validation. What must still happen before execution?",
+          "answer": 2,
+          "options": [
+            { "label": "Ask the model to confirm the caller is authorized.", "explanation": "The model does not have authority to grant access to the library’s records." },
+            { "label": "Execute if the tool name is already on the allowlist.", "explanation": "An allowlist limits available operations but does not grant permission on a particular record." },
+            { "label": "Check the authenticated caller’s permissions and the resource rules.", "explanation": "Shape validation cannot establish who the caller is or whether the proposed write is allowed." }
+          ]
+        },
+        "sources": [
+          { "title": "OpenAI: Function calling", "url": "https://developers.openai.com/api/docs/guides/function-calling" },
+          { "title": "JSON Schema: Objects, required fields, and additional properties", "url": "https://json-schema.org/understanding-json-schema/reference/object" },
+          { "title": "AWS Builders’ Library: Making retries safe with idempotent APIs", "url": "https://aws.amazon.com/builders-library/making-retries-safe-with-idempotent-APIs/" }
+        ]
+      },
+      "practice": {
+        "kind": "scenario",
+        "title": "Specify a cancellation tool",
+        "instructions": "A library assistant may cancel an active hold for the signed-in member. Select every contract decision that would make cancellation safe to execute and easy to interpret.",
+        "explanation": "Require a specific hold ID, authorize against the session and actual record, and specify what a successful cancellation and its replay return. Keep this write separate from lookups.",
+        "options": [
+          { "label": "Use one tool that checks a hold and cancels it whenever it finds a match.", "feedback": "A lookup should not quietly change state. Make cancellation a separate, explicitly described write." },
+          { "label": "Require exactly one typed hold ID for the cancellation proposal.", "feedback": "A narrow input identifies the intended hold without introducing model-chosen identity or extra commands." },
+          { "label": "Use the session identity and verify ownership of the hold at execution.", "feedback": "Permission must come from authenticated context and the actual record, regardless of how plausible the proposal looks." },
+          { "label": "Treat any nonempty cancellation message as a successful outcome.", "feedback": "An error message can also be nonempty. Separate a confirmed cancellation from a typed failure." },
+          { "label": "Define a typed cancellation receipt and replay it for the same idempotency key.", "feedback": "A receipt records the confirmed outcome, and a server-enforced idempotency key lets a duplicate request return it without another write." }
+        ],
+        "correct": [1, 2, 4]
+      }
+    },
+    {
+      "id": "agent-loop",
+      "title": "Build the agent loop",
+      "notes": {
+        "topic": "Tools & integrations",
+        "minutes": 4,
+        "lead": "Tool calling is a conversation between the runtime and the model, with real operations in between. The model chooses what to propose next; the runtime is the part of your application that decides whether another step is allowed.",
+        "sections": [
+          {
+            "heading": "Turn a proposal into an observation",
+            "paragraphs": [
+              "Start a run with the user’s goal, relevant context, the tool definitions permitted for that run, and limits enforced by your application. On each turn, the model can return final text or propose one or more tool calls. A tool call is structured data, not evidence that an action happened.",
+              "For each proposal, the runtime checks the tool name, parses and validates the arguments, checks authorization and any required approval, and dispatches only allowed calls using scoped credentials and a timeout. A rejected call is not executed. Where another turn is safe, the runtime can send a typed rejection or a tool result back to the model as an observation, linked to the original call ID. Treat returned text as data, not instructions."
+            ]
+          },
+          {
+            "heading": "Stop in the runtime, not the prompt",
+            "paragraphs": [
+              "An observation may be enough to answer or may justify another call. The runtime checks the remaining step budget and deadline before making another model request or starting more tool work. A valid final answer ends the run; so do cancellation, a blocking denial, or exhausted limits. A prompt that asks the model to stop after five steps does not enforce a limit.",
+              "Finish with what the runtime can verify. If the deadline arrives after a lookup but before a requested write, say that the lookup succeeded and the write was not attempted. If a write was attempted but never confirmed, report that its outcome is unknown. Do not treat fluent final text as a receipt."
+            ]
+          }
+        ],
+        "flow": ["Prepare context and limits", "Propose a call or answer", "Validate and authorize", "Execute the allowed tool", "Return the observation", "Repeat or stop"],
+        "example": {
+          "title": "Look up an order on request",
+          "steps": [
+            { "label": "Propose", "detail": "A customer asks for the status of order #42. The runtime offers lookup_order but no write tool, sets a deadline, and receives a proposal with the order ID and a call ID." },
+            { "label": "Validate and execute", "detail": "The runtime checks the ID and confirms the signed-in customer can access the order. It invokes the lookup; the order service reports that the package has shipped." },
+            { "label": "Observe and stop", "detail": "The runtime passes the shipping status back with the matching call ID. The model produces an answer based on that result, and the runtime ends the run without another tool call." }
+          ]
+        },
+        "question": {
+          "prompt": "The model emits a valid lookup call after the run deadline has expired. What should the runtime do?",
+          "answer": 0,
+          "options": [
+            { "label": "Do not dispatch the call; report what was established before the deadline.", "explanation": "A valid proposal still needs runtime permission to execute, and the deadline has ended the run." },
+            { "label": "Make one last call because the lookup is read-only.", "explanation": "Read-only describes side effects, not an exception to a run deadline." },
+            { "label": "Ask the model whether the deadline can be extended.", "explanation": "The runtime owns scheduling limits, and a follow-up model request would itself exceed the deadline." }
+          ]
+        },
+        "sources": [
+          { "title": "OpenAI: The function-calling flow", "url": "https://developers.openai.com/api/docs/guides/function-calling" },
+          { "title": "Anthropic: Client tool use with Claude", "url": "https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview" }
+        ]
+      },
+      "practice": {
+        "kind": "graph",
+        "labId": "agent-loop",
+        "title": "Wire a runtime-controlled tool call",
+        "instructions": "Add the Tool API to the existing user, runtime, and model graph. Wire the component that validates and dispatches proposals to the tool, then validate the graph and step through the simulated order lookup.",
+        "explanation": "The runtime calls the model and the tool separately. The arrows represent requests with responses on the same connections: the runtime receives the observation, passes it to the model, and decides when the loop stops."
+      }
+    },
+    {
+      "id": "tool-failures",
+      "title": "Handle tool failures",
+      "notes": {
+        "topic": "Tools & integrations",
+        "minutes": 4,
+        "lead": "A timeout tells you that a reply did not arrive in time. It does not tell you whether the service made a change. Recovery starts by separating the status of the connection from the outcome of the operation.",
+        "sections": [
+          {
+            "heading": "Classify before choosing a retry",
+            "paragraphs": [
+              "An invalid argument needs correction, not an identical request. A permission denial stops that action; changing credentials or asking the model to try another route does not make it authorized. A business rejection such as ITEM_UNAVAILABLE changes the plan: report it or offer an alternative, but do not keep submitting the same request.",
+              "A temporary outage or rate limit can justify a retry for a safe operation. Use an attempt cap and a total deadline. Increase the wait between attempts up to a cap, add jitter (a small random variation) so clients do not retry together, and honor documented server retry delays when they fit the budget. An uncertain write needs a separate decision even if the error itself looks temporary."
+            ]
+          },
+          {
+            "heading": "Resolve an uncertain write",
+            "paragraphs": [
+              "Record the action’s identity and its idempotency key before sending a write. If the reply is lost, use an authoritative status lookup keyed to that operation when the service offers one. If it reports success, use the existing receipt. If it reports the operation is pending, wait or check again only within the recovery budget. Treat a missing record as inconclusive unless the service guarantees otherwise.",
+              "If a replay is needed, resend unchanged arguments with the same key only when the service guarantees deduplication for that operation and the key is still valid. Generating a new key makes the retry look like a different intent. If you cannot verify the outcome or safely replay, stop, preserve the operation reference, and report uncertainty or escalate for reconciliation."
+            ]
+          }
+        ],
+        "flow": ["Capture the operation and error", "Classify the failure", "Check authoritative status", "Gate any replay", "Return confirmed or unknown"],
+        "example": {
+          "title": "Recover a timed-out library hold",
+          "steps": [
+            { "label": "Record before sending", "detail": "The runtime records key H-71 with the member, kit, and branch for one hold. The call times out after reaching the service, so the runtime marks the result as unknown." },
+            { "label": "Check the original operation", "detail": "Rather than submitting another hold, the runtime asks the service for the status of H-71. The service returns a committed hold with receipt R-19." },
+            { "label": "Report without another write", "detail": "The assistant confirms the hold using R-19. If the service instead remained unreachable and offered no replay guarantee, the assistant would report that the hold could not be confirmed." }
+          ]
+        },
+        "question": {
+          "prompt": "A create call timed out. There is no status lookup and the service does not deduplicate. What should the runtime do?",
+          "answer": 1,
+          "options": [
+            { "label": "Retry with the original key anyway.", "explanation": "A key cannot prevent a duplicate unless the service recognizes and enforces it." },
+            { "label": "Stop the automatic write and report that the outcome is unknown.", "explanation": "The write may have committed, and neither available evidence nor the contract makes replay safe." },
+            { "label": "Declare failure because the client received no receipt.", "explanation": "A lost reply is consistent with a successful write; lack of a receipt is not proof of failure." }
+          ]
+        },
+        "sources": [
+          { "title": "AWS Builders’ Library: Making retries safe with idempotent APIs", "url": "https://aws.amazon.com/builders-library/making-retries-safe-with-idempotent-APIs/" },
+          { "title": "AWS Builders’ Library: Timeouts, retries, and backoff with jitter", "url": "https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/" }
+        ]
+      },
+      "practice": {
+        "kind": "sequence",
+        "title": "Recover a write without duplicating it",
+        "instructions": "A library hold request with a recorded idempotency key timed out. The service offers status lookup and guarantees same-key deduplication within a retention window. Order the recovery steps from the timeout through the user report.",
+        "explanation": "Treat the write as uncertain, reconcile against the original key, then use the status to decide whether replay is needed and safe. Report only what the recovery established.",
+        "items": [
+          { "id": "report", "label": "Report the resulting receipt or state that the outcome is still unknown." },
+          { "id": "replay", "label": "If another attempt is needed and both the key and retry budget remain valid, replay the same arguments with the original key; otherwise do not resend." },
+          { "id": "classify", "label": "Classify the timeout as an unknown write outcome, not proof of failure." },
+          { "id": "reconcile", "label": "Use the recorded key to check the original operation’s status and accept any confirmed receipt." }
+        ],
+        "correctOrder": ["classify", "reconcile", "replay", "report"]
+      }
+    },
+    {
+      "id": "integration-boundaries",
+      "title": "Connect tools with MCP",
+      "notes": {
+        "topic": "Tools & integrations",
+        "minutes": 4,
+        "lead": "Model Context Protocol, or MCP, gives applications a common way to discover and invoke tools offered by other services. It standardizes the conversation between software components. It does not give a model permission to use everything those components advertise.",
+        "sections": [
+          {
+            "heading": "Separate host, client, and server",
+            "paragraphs": [
+              "The host is the application running the assistant. It owns user interaction, policy, consent, and the decision about which tools reach the model. The host creates an MCP client for each server connection. A client handles the protocol session and sends requests: tools/list discovers definitions and input schemas, and tools/call invokes a named operation with arguments.",
+              "The MCP server provides the tools. It advertises capabilities, implements the operations or calls a downstream service, and returns the result. The model is not the MCP client: it proposes a call to the host. The host can validate and decline the proposal without sending anything to the server."
+            ]
+          },
+          {
+            "heading": "Discovery is not authorization",
+            "paragraphs": [
+              "A listing tells the client which operations a server advertises. It is not a promise that this caller can invoke them, let alone act on every record. The host should connect only to approved servers, expose only tools appropriate to the current user and task, and apply the runtime’s validation and approval rules before invocation. A server-supplied label such as read-only does not prove how the operation behaves.",
+              "For a remote HTTP connection using MCP authorization, use narrowly scoped access tokens intended for that MCP server. The server validates credentials and enforces access for the operation and target resource. The host does not hand credentials to the model, and the server must not pass its incoming MCP access token through to a downstream API. A reachable server and valid arguments are not substitutes for these checks."
+            ]
+          }
+        ],
+        "flow": ["Connect to an approved server", "Discover tool definitions", "Filter for the current task", "Validate and authorize the call", "Invoke and check the result"],
+        "example": {
+          "title": "Connect a public catalog without exposing member records",
+          "steps": [
+            { "label": "Discover", "detail": "A library host connects its MCP client to an approved server. For this example the server advertises search_catalog and export_member_records; both arrive as definitions, not as permissions." },
+            { "label": "Filter", "detail": "Catalog visitors need search only. The host shows the model search_catalog and refuses to dispatch a proposed export, even if the model supplies valid export arguments." },
+            { "label": "Invoke with limited authority", "detail": "The client calls search_catalog with validated arguments and access scoped for catalog reads. The server independently enforces permissions before returning only the catalog fields needed to answer." }
+          ]
+        },
+        "question": {
+          "prompt": "An approved server lists a tool for exporting member records. What does that listing establish?",
+          "answer": 2,
+          "options": [
+            { "label": "Any user who can connect may export those records.", "explanation": "Connection permission is not permission to invoke an operation on restricted records." },
+            { "label": "A schema-valid export proposal should run without further checks.", "explanation": "The schema describes arguments; it cannot authorize the caller or the requested data." },
+            { "label": "The server advertises the export operation and its interface.", "explanation": "Discovery describes the operation. Host policy and server-side permission checks still control use." }
+          ]
+        },
+        "sources": [
+          { "title": "MCP specification: Architecture", "url": "https://modelcontextprotocol.io/specification/2025-11-25/architecture" },
+          { "title": "MCP specification: Server tools", "url": "https://modelcontextprotocol.io/specification/2025-11-25/server/tools" },
+          { "title": "MCP specification: Authorization", "url": "https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization" }
+        ]
+      },
+      "practice": {
+        "kind": "scenario",
+        "title": "Expose directory search, not account changes",
+        "instructions": "An approved staff-directory server advertises search_directory and deactivate_account. This assistant helps employees find coworkers and is not an administrative tool. Select every decision appropriate for the integration.",
+        "explanation": "MCP discovery supplies definitions. The host filters what the model can propose and dispatch, the client handles the protocol, and the server enforces permissions on each request.",
+        "options": [
+          { "label": "Expose only search_directory and reject deactivation proposals in the host.", "feedback": "Filtering supports the task, and enforcing the allowlist at dispatch prevents an unlisted proposal from running." },
+          { "label": "Treat a successful tools/list request as permission to invoke either operation.", "feedback": "Discovery advertises capabilities; it does not grant the caller permission to use them." },
+          { "label": "Give the model the directory credential so it can invoke tools directly.", "feedback": "The client handles transport and credentials; the runtime must retain control over invocation." },
+          { "label": "Use access scoped to directory search and have the server authorize each request.", "feedback": "Limited credentials reduce exposure, while the server can enforce the operation and visible records for that caller." },
+          { "label": "Have the host validate the search arguments before its client sends tools/call.", "feedback": "The model proposes data. The host validates and authorizes dispatch before the client makes the protocol request." }
+        ],
+        "correct": [0, 3, 4]
+      }
+    }
+  ]
+}

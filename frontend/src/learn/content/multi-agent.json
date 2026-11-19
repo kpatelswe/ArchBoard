@@ -1,0 +1,555 @@
+{
+  "id": "multi-agent",
+  "title": "Multi-agent systems",
+  "lessons": [
+    {
+      "id": "agent-handoffs",
+      "title": "Roles, ownership & handoffs",
+      "notes": {
+        "topic": "Multi-agent systems",
+        "minutes": 4,
+        "lead": "Once a system has more than one agent, the hardest question is not which model each one uses. It is who owns the user’s request right now, what that owner is allowed to see and do, and who is responsible for deciding that the work is finished.",
+        "sections": [
+          {
+            "heading": "One owner at a time",
+            "paragraphs": [
+              "A role is a narrow job description: instructions, tools, and the kind of output the role produces. Ownership is different. The owner is the single agent currently responsible for the conversation or task, and for either finishing it or explicitly passing it on. If two agents both believe they own a refund, you get duplicate messages or duplicate refunds; if neither does, the request silently stalls.",
+              "OpenAI’s Agents SDK describes two shapes. With agents as tools, a manager keeps ownership and calls a specialist for a bounded subtask, then writes the final answer itself. With a handoff, a triage agent transfers the conversation and the specialist becomes the active agent. Pick the shape on purpose: keep ownership when results must be combined, transfer it when the specialist should talk to the user directly."
+            ]
+          },
+          {
+            "heading": "What a handoff carries",
+            "paragraphs": [
+              "A handoff is a tool call, so treat it like one. Give it a small typed payload the receiving agent needs, such as a reason, priority, and summary, and log it. By default the receiving agent sees the conversation history; an input filter lets you trim that history so the specialist gets the case, not every unrelated message or secret the first agent saw.",
+              "Permissions do not travel with the conversation. The refund specialist’s tools should be checked by your application against the authenticated user and the order, every time. The SDK documentation is explicit that authorization depending on handoff arguments belongs at the start of the handoff callback, which should raise before any side effect if the check fails."
+            ]
+          },
+          {
+            "heading": "Who decides it is done",
+            "paragraphs": [
+              "Every handoff needs a termination rule: the receiving owner either completes the task, hands it back with a result, or escalates to a human. Record which agent owns the task in application state, not only in prompt text, so a timeout or crash can be traced to a responsible owner and resumed or cancelled cleanly.",
+              "If the specialist cannot finish, a handback should return a short structured result to the previous owner rather than a raw transcript, so the receiving agent can decide the next step without rereading everything."
+            ]
+          }
+        ],
+        "flow": [
+          "Triage agent classifies",
+          "Runtime validates handoff payload",
+          "Ownership transfers with filtered context",
+          "Specialist acts within its own permissions",
+          "Owner completes, returns, or escalates"
+        ],
+        "example": {
+          "title": "Moving a duplicate-charge complaint to billing",
+          "steps": [
+            {
+              "label": "Triage",
+              "detail": "The support agent recognizes a duplicate charge and calls transfer_to_billing with reason duplicate_charge and the order ID."
+            },
+            {
+              "label": "Check",
+              "detail": "The handoff callback confirms the signed-in user owns that order before anything else happens; otherwise it raises and triage explains the problem."
+            },
+            {
+              "label": "Context",
+              "detail": "An input filter passes the complaint and order summary, dropping earlier unrelated chat about shipping addresses."
+            },
+            {
+              "label": "Finish",
+              "detail": "The billing agent owns the case, issues at most one refund through an authorized tool, and closes the case or escalates to a person."
+            }
+          ]
+        },
+        "question": {
+          "prompt": "A triage agent hands a conversation to a refund agent. Which statement about the refund agent’s ability to issue refunds is correct?",
+          "answer": 2,
+          "options": [
+            {
+              "label": "It inherits the triage agent’s permissions.",
+              "explanation": "Permissions are not a property of the conversation. Each tool call must be authorized by the application for the actual user and resource."
+            },
+            {
+              "label": "The handoff itself proves the refund is allowed.",
+              "explanation": "A handoff is a model-proposed routing decision. It is evidence of intent, not of eligibility or authorization."
+            },
+            {
+              "label": "Its tools must still be authorized for this user and order.",
+              "explanation": "Right. Ownership transfers, but the application enforces authorization at every side-effecting tool call."
+            }
+          ]
+        },
+        "sources": [
+          {
+            "title": "OpenAI Agents SDK: Handoffs",
+            "url": "https://openai.github.io/openai-agents-python/handoffs/"
+          },
+          {
+            "title": "OpenAI Agents SDK: Agent orchestration",
+            "url": "https://openai.github.io/openai-agents-python/multi_agent/"
+          }
+        ]
+      },
+      "practice": {
+        "kind": "scenario",
+        "title": "Design a support handoff",
+        "instructions": "A support assistant must transfer billing disputes to a billing specialist that can issue refunds. Select every decision that keeps ownership clear, context scoped, permissions enforced, and termination defined. Leave out decisions that are unsafe or unnecessary.",
+        "options": [
+          {
+            "label": "Record the current owning agent for each case in application state",
+            "feedback": "Yes. A durable owner lets you trace, resume, or cancel the case when an agent times out or crashes."
+          },
+          {
+            "label": "Give the handoff a typed payload with reason, priority, and order ID",
+            "feedback": "Yes. A small validated payload tells the specialist why it was called and can be logged before it takes over."
+          },
+          {
+            "label": "Filter the history so the specialist receives only the relevant case context",
+            "feedback": "Yes. Scoped context keeps the specialist focused and avoids passing unrelated personal data."
+          },
+          {
+            "label": "Authorize the refund tool against the signed-in user and order on every call",
+            "feedback": "Yes. Permissions are enforced by the application at the tool boundary, regardless of which agent asked."
+          },
+          {
+            "label": "Let both agents keep replying to the customer after the handoff",
+            "feedback": "No. Two simultaneous owners produce conflicting messages and duplicate actions. Exactly one agent owns the turn."
+          },
+          {
+            "label": "Pass the triage agent’s admin API key to the billing agent in the prompt",
+            "feedback": "No. Credentials never belong in prompt text, and the specialist should only have the narrow tools its role needs."
+          },
+          {
+            "label": "Require the specialist to finish, return the result, or escalate to a person",
+            "feedback": "Yes. An explicit termination rule prevents cases that silently stall between agents."
+          }
+        ],
+        "correct": [
+          0,
+          1,
+          2,
+          3,
+          6
+        ],
+        "explanation": "A good handoff transfers ownership exactly once, carries a small validated payload and only relevant context, and leaves authorization to the application at each tool call. The new owner is also responsible for ending the task: completing it, returning a result, or escalating."
+      }
+    },
+    {
+      "id": "manager-worker",
+      "title": "Manager–worker architectures",
+      "notes": {
+        "topic": "Multi-agent systems",
+        "minutes": 4,
+        "lead": "In a manager–worker design, one agent decides what work is needed, hands bounded pieces to specialists, and combines what comes back. It is powerful when the subtasks cannot be known in advance, and wasteful when they can.",
+        "sections": [
+          {
+            "heading": "Delegation is a contract",
+            "paragraphs": [
+              "Anthropic calls this the orchestrator–workers pattern: a central model breaks down a task, delegates pieces to workers, and synthesizes their results. Unlike a fixed parallel workflow, the subtasks are chosen at run time from the input. That flexibility is the reason to use it, and also the source of its failures.",
+              "In Anthropic’s research system, short instructions such as “research the semiconductor shortage” led workers to duplicate each other or misread the task. Their fix was to make each delegation explicit: an objective, an output format, guidance on tools and sources, and clear task boundaries. Treat that brief as the contract the worker is held to."
+            ]
+          },
+          {
+            "heading": "Accept before you synthesize",
+            "paragraphs": [
+              "A worker’s report is an observation, not a fact. Before the manager uses it, check it against the acceptance criteria in the brief: did it answer the assigned question, in the requested format, with sources, inside its boundary? Reject or re-delegate what fails rather than blending it into the final answer.",
+              "Synthesis is the manager’s job and the reason it keeps ownership. It resolves conflicts between workers, notes gaps instead of filling them with guesses, and decides whether more work is needed. Large outputs can be written to shared storage by workers and passed back as references, which reduces the copying and loss Anthropic describes as a game of telephone."
+            ]
+          },
+          {
+            "heading": "Bound the manager too",
+            "paragraphs": [
+              "Early versions of that research system spawned dozens of workers for simple questions. Give the manager explicit scaling rules and limits on worker count, rounds, and tokens, plus a stop condition for when evidence is sufficient. Without those, delegation turns into unbounded spending.",
+              "Count those limits in the runtime, not only in the prompt. When a limit is reached, the manager should synthesize what it has accepted so far and report the remaining gaps rather than starting another round of delegation."
+            ]
+          }
+        ],
+        "flow": [
+          "Define goal and acceptance criteria",
+          "Decompose into bounded subtasks",
+          "Brief each worker",
+          "Workers execute and report",
+          "Manager accepts or rejects reports",
+          "Synthesize and stop"
+        ],
+        "example": {
+          "title": "Comparing three vendors for a security review",
+          "steps": [
+            {
+              "label": "Decompose",
+              "detail": "The manager splits the request into one subtask per vendor, because each can be researched independently."
+            },
+            {
+              "label": "Brief",
+              "detail": "Each worker gets one vendor, the five required criteria, a table output format, allowed sources, and a rule not to research other vendors."
+            },
+            {
+              "label": "Accept",
+              "detail": "One report lacks sources for two criteria; the manager rejects those rows and re-delegates only that gap, within its round limit."
+            },
+            {
+              "label": "Synthesize",
+              "detail": "The manager merges the accepted tables, marks unresolved criteria as unknown, and returns the comparison."
+            }
+          ]
+        },
+        "question": {
+          "prompt": "A worker returns a confident report that ignores the requested output format and cites no sources. What should the manager do?",
+          "answer": 0,
+          "options": [
+            {
+              "label": "Reject it against the acceptance criteria and re-delegate or flag the gap.",
+              "explanation": "Correct. Acceptance checks are what keep weak worker output out of the final synthesis."
+            },
+            {
+              "label": "Merge it, since the worker sounded confident.",
+              "explanation": "Confidence is not evidence. Unverified reports should not be blended into the answer."
+            },
+            {
+              "label": "Spawn ten more workers on the same question.",
+              "explanation": "Unbounded fan-out wastes budget and duplicates work. Fix the specific gap within limits instead."
+            }
+          ]
+        },
+        "sources": [
+          {
+            "title": "Anthropic: Building effective agents",
+            "url": "https://www.anthropic.com/engineering/building-effective-agents"
+          },
+          {
+            "title": "Anthropic: How we built our multi-agent research system",
+            "url": "https://www.anthropic.com/engineering/multi-agent-research-system"
+          }
+        ]
+      },
+      "practice": {
+        "kind": "sequence",
+        "title": "Order a bounded delegation",
+        "instructions": "A manager agent must produce a vendor comparison by delegating research to worker agents. Put the steps in the order that keeps delegation bounded, checks worker output, and ends with a single synthesized answer.",
+        "items": [
+          {
+            "id": "synthesize",
+            "label": "Synthesize accepted reports and mark remaining gaps"
+          },
+          {
+            "id": "brief",
+            "label": "Brief each worker with objective, format, tools, and boundaries"
+          },
+          {
+            "id": "criteria",
+            "label": "Define the goal, acceptance criteria, and worker limits"
+          },
+          {
+            "id": "accept",
+            "label": "Check each report against the acceptance criteria"
+          },
+          {
+            "id": "decompose",
+            "label": "Decompose the request into independent bounded subtasks"
+          },
+          {
+            "id": "execute",
+            "label": "Workers research only their assigned subtask and report back"
+          }
+        ],
+        "correctOrder": [
+          "criteria",
+          "decompose",
+          "brief",
+          "execute",
+          "accept",
+          "synthesize"
+        ],
+        "explanation": "The manager first fixes what success looks like and how much it may spend, then decomposes and briefs workers precisely. Workers stay in their boundaries, the manager accepts or rejects each report, and only accepted evidence reaches the final synthesis."
+      }
+    },
+    {
+      "id": "parallel-agents",
+      "title": "Parallel work & shared state",
+      "notes": {
+        "topic": "Multi-agent systems",
+        "minutes": 4,
+        "lead": "Running workers at the same time can cut wall-clock time dramatically. It also creates the classic problems of concurrent systems: two writers racing on the same record, results arriving out of order, and fan-out that grows until it exhausts your budget.",
+        "sections": [
+          {
+            "heading": "Parallelize only independent work",
+            "paragraphs": [
+              "Anthropic describes two forms of parallelization: sectioning a task into independent subtasks, and voting, where the same task runs several times for higher confidence. Both depend on independence. In their research system, running three to five workers at once cut research time by up to 90% for complex queries, but they also note that most coding tasks have fewer truly parallel pieces than research.",
+              "Before fanning out, ask whether each subtask can finish without reading another worker’s unfinished output. If not, it belongs in a dependency order, not a parallel batch."
+            ]
+          },
+          {
+            "heading": "Keep shared state owned",
+            "paragraphs": [
+              "Workers should not edit the same shared document or row directly. Give each worker its own output slot keyed by task ID, and let a single coordinator merge results. Where a shared record must change, use one writer or a versioned compare-and-swap write that fails on conflict instead of silently overwriting.",
+              "Results arrive in any order and some never arrive. Make each worker’s write idempotent, so a retried task replaces rather than duplicates its result, and have the coordinator wait with a timeout. A missing result is reported as a gap, not hidden."
+            ]
+          },
+          {
+            "heading": "Bound the fan-out",
+            "paragraphs": [
+              "Set a hard cap on concurrent workers and total workers per request, enforced by the runtime rather than requested in a prompt. Anthropic reports early agents spawning 50 subagents for simple queries; embedding effort scaling rules helped, but a code-level limit is what guarantees the bound.",
+              "Choose the cap from real limits: provider rate limits, the cost per worker, and how many results the coordinator can check. Requests beyond the cap wait in a queue or are rejected with a clear message instead of spawning more workers."
+            ]
+          }
+        ],
+        "flow": [
+          "Check subtasks are independent",
+          "Launch up to the concurrency cap",
+          "Each worker writes to its own keyed slot",
+          "Coordinator waits with a timeout",
+          "Merge results and report gaps"
+        ],
+        "example": {
+          "title": "Summarizing five customer interviews",
+          "steps": [
+            {
+              "label": "Independence",
+              "detail": "Each interview can be summarized without the others, so the coordinator fans out with a cap of three concurrent workers."
+            },
+            {
+              "label": "Isolation",
+              "detail": "Workers write to summaries/<interview-id>; none touch the shared final report."
+            },
+            {
+              "label": "Retry",
+              "detail": "One worker times out and is retried; because its write is keyed and idempotent, there is still exactly one summary for that interview."
+            },
+            {
+              "label": "Merge",
+              "detail": "After a deadline the coordinator merges four summaries, lists the fifth as missing, and writes the report once."
+            }
+          ]
+        },
+        "question": {
+          "prompt": "Two parallel workers both append findings directly to the same shared report. What is the main risk, and the fix?",
+          "answer": 1,
+          "options": [
+            {
+              "label": "Higher token cost; use a cheaper model.",
+              "explanation": "Cost may matter, but it does not address concurrent writes that can overwrite each other."
+            },
+            {
+              "label": "A write race; give each worker its own slot and let one coordinator merge.",
+              "explanation": "Correct. Separate keyed outputs plus a single writer removes the race."
+            },
+            {
+              "label": "No risk, because models do not run concurrently.",
+              "explanation": "Parallel workers do run concurrently; that is the point of parallelism, and why shared state needs an owner."
+            }
+          ]
+        },
+        "sources": [
+          {
+            "title": "Anthropic: Building effective agents",
+            "url": "https://www.anthropic.com/engineering/building-effective-agents"
+          },
+          {
+            "title": "Anthropic: How we built our multi-agent research system",
+            "url": "https://www.anthropic.com/engineering/multi-agent-research-system"
+          }
+        ]
+      },
+      "practice": {
+        "kind": "scenario",
+        "title": "Coordinate parallel research workers",
+        "instructions": "A coordinator fans out research on twelve competitor websites to worker agents and must produce one report. Select every decision that keeps workers independent, avoids shared-state races, and bounds the fan-out. Leave out the unsafe or unnecessary ones.",
+        "options": [
+          {
+            "label": "Have every worker edit the shared final report as it finishes",
+            "feedback": "No. Concurrent edits to one document race and overwrite each other. One coordinator should write the report."
+          },
+          {
+            "label": "Write each worker’s result to its own slot keyed by task ID",
+            "feedback": "Yes. Isolated, keyed outputs make results independent and easy to merge."
+          },
+          {
+            "label": "Enforce a runtime cap on concurrent and total workers",
+            "feedback": "Yes. A code-level limit guarantees bounded fan-out and cost, even if the model asks for more."
+          },
+          {
+            "label": "Make worker writes idempotent so retries replace rather than duplicate",
+            "feedback": "Yes. Retried or duplicated tasks then leave exactly one result per site."
+          },
+          {
+            "label": "Wait for every worker indefinitely before merging",
+            "feedback": "No. One stuck worker would block the whole request. Use a deadline and report missing results as gaps."
+          },
+          {
+            "label": "Spawn one new worker for every link each worker discovers",
+            "feedback": "No. Recursive fan-out is unbounded and quickly exhausts the budget."
+          },
+          {
+            "label": "Merge with a single coordinator after a deadline and list missing sites",
+            "feedback": "Yes. A single writer and a deadline give a complete, honest report even when some workers fail."
+          }
+        ],
+        "correct": [
+          1,
+          2,
+          3,
+          6
+        ],
+        "explanation": "Parallel workers are safe when each owns its own keyed, idempotent output, a runtime cap bounds how many run, and a single coordinator merges after a deadline, reporting gaps instead of waiting forever or racing on shared state."
+      }
+    },
+    {
+      "id": "coordination-tradeoffs",
+      "title": "Know when one agent is enough",
+      "notes": {
+        "topic": "Multi-agent systems",
+        "minutes": 4,
+        "lead": "Multiple agents are not an upgrade by default. Every extra agent adds tokens, latency, and another report to check. Start with the simplest architecture that meets the requirements, and add agents only when you can name what they buy.",
+        "sections": [
+          {
+            "heading": "Coordination has a price",
+            "paragraphs": [
+              "Anthropic’s guidance is to find the simplest solution possible and increase complexity only when needed, which might mean not building an agentic system at all. Their research system measured the cost: agents used about four times the tokens of chat, and multi-agent systems about fifteen times. Those systems were worth it only where the task’s value paid for that spend.",
+              "The overhead is concrete. Each worker needs a brief, reads its own context, returns a report, and the manager must read, check, and merge it. Workers that need the same context, or that depend on each other’s results, pay that overhead without gaining much parallelism."
+            ]
+          },
+          {
+            "heading": "What multiple agents buy",
+            "paragraphs": [
+              "The same report names where multi-agent designs excel: heavily parallel work, information that exceeds a single context window, and many complex tools. If your task is a short, sequential sequence of steps, one agent with good tools and a clear loop will usually be faster, cheaper, and easier to debug.",
+              "OpenAI’s orchestration guide adds a second axis: orchestration in code is more predictable in speed, cost, and performance than letting a model decide. A fixed workflow of specialized calls is often a better step up from one agent than a free-form manager."
+            ]
+          },
+          {
+            "heading": "Quantify, then choose",
+            "paragraphs": [
+              "Write the requirements as numbers: coverage needed, token budget, latency limit, and how many reports a reviewer can check. Estimate each architecture against them, including coordination cost. Pick the smallest design that satisfies every constraint, and re-measure with evaluations once it runs.",
+              "Count review effort too. A person or manager agent can check only so many reports well, and every report it skims is a place where an unverified claim can slip into the answer."
+            ]
+          }
+        ],
+        "flow": [
+          "State requirements as numbers",
+          "Estimate single-agent cost and latency",
+          "Add coordination overhead per worker",
+          "Reject designs that break a constraint",
+          "Choose the simplest one that passes"
+        ],
+        "example": {
+          "title": "Researching four independent markets",
+          "steps": [
+            {
+              "label": "Single agent",
+              "detail": "One agent covering four markets alone needs 80k tokens and about eight minutes of serial work, which breaks a six-minute latency limit."
+            },
+            {
+              "label": "Six workers",
+              "detail": "Six workers cover everything quickly, but at 20k tokens each the run costs over 100k tokens and produces more reports than the reviewer can check."
+            },
+            {
+              "label": "Two workers",
+              "detail": "Two workers cover two markets while the lead covers two itself: 80k tokens, about six minutes, two reports to check."
+            },
+            {
+              "label": "Decision",
+              "detail": "The smallest design meeting every limit wins; adding a third worker would add cost without a requirement that needs it."
+            }
+          ]
+        },
+        "question": {
+          "prompt": "A task is a short sequence of dependent steps that all need the same context. Which architecture is most likely appropriate?",
+          "answer": 2,
+          "options": [
+            {
+              "label": "A manager with many parallel workers.",
+              "explanation": "Dependent steps and shared context leave little to parallelize, so workers add overhead without benefit."
+            },
+            {
+              "label": "Several agents voting on every step.",
+              "explanation": "Voting multiplies cost and helps confidence on independent attempts, not dependent sequential work."
+            },
+            {
+              "label": "A single agent or a fixed workflow.",
+              "explanation": "Correct. The simplest design meeting the requirements avoids coordination overhead that buys nothing here."
+            }
+          ]
+        },
+        "sources": [
+          {
+            "title": "Anthropic: Building effective agents",
+            "url": "https://www.anthropic.com/engineering/building-effective-agents"
+          },
+          {
+            "title": "Anthropic: How we built our multi-agent research system",
+            "url": "https://www.anthropic.com/engineering/multi-agent-research-system"
+          },
+          {
+            "title": "OpenAI Agents SDK: Agent orchestration",
+            "url": "https://openai.github.io/openai-agents-python/multi_agent/"
+          }
+        ]
+      },
+      "practice": {
+        "kind": "budget",
+        "title": "Size a research team",
+        "instructions": "A request must cover 4 independent markets. Simplified units: each worker agent covers 1 market and costs 20k tokens, including its brief and report; the lead covers 1 market per 20k tokens it spends itself. Serial time is 1 minute per worker report to check and merge plus 1 minute per 10k lead tokens. Choose the smallest team that meets every limit.",
+        "fields": [
+          {
+            "id": "workers",
+            "label": "Worker agents",
+            "unit": "agents",
+            "min": 0,
+            "max": 6,
+            "step": 1,
+            "initial": 6
+          },
+          {
+            "id": "leadTokens",
+            "label": "Lead agent tokens",
+            "unit": "k tokens",
+            "min": 10,
+            "max": 80,
+            "step": 10,
+            "initial": 60
+          }
+        ],
+        "constraints": [
+          {
+            "label": "Cover at least 4 markets",
+            "coefficients": {
+              "workers": 1,
+              "leadTokens": 0.05
+            },
+            "operator": ">=",
+            "limit": 4
+          },
+          {
+            "label": "Stay within 100k total tokens",
+            "coefficients": {
+              "workers": 20,
+              "leadTokens": 1
+            },
+            "operator": "<=",
+            "limit": 100
+          },
+          {
+            "label": "Finish within 6 minutes of serial time",
+            "coefficients": {
+              "workers": 1,
+              "leadTokens": 0.1
+            },
+            "operator": "<=",
+            "limit": 6
+          },
+          {
+            "label": "Keep review to at most 3 worker reports",
+            "coefficients": {
+              "workers": 1
+            },
+            "operator": "<=",
+            "limit": 3
+          }
+        ],
+        "solution": {
+          "workers": 2,
+          "leadTokens": 40
+        },
+        "explanation": "Six workers cover everything but cost 180k tokens and exceed the review limit. A lone lead needs 80k tokens and 8 minutes. Two workers plus 40k lead tokens cover 4 markets with 80k tokens, 6 minutes, and 2 reports; that is the simplest team meeting every requirement."
+      }
+    }
+  ]
+}

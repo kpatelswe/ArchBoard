@@ -1,0 +1,296 @@
+{
+  "id": "knowledge-memory",
+  "title": "Knowledge & memory",
+  "lessons": [
+    {
+      "id": "grounding",
+      "title": "Ground answers with retrieval",
+      "notes": {
+        "topic": "Knowledge & memory",
+        "minutes": 4,
+        "lead": "A model only knows what it learned in training and what your application puts in its context. Your refund policy, last week’s price change, and a customer’s contract are in neither. Retrieval-augmented generation (RAG) closes that gap by fetching evidence first and answering from it.",
+        "sections": [
+          {
+            "heading": "Retrieve, then generate",
+            "paragraphs": [
+              "In a grounded design, the runtime turns the user’s question into a search query, asks a knowledge store for the most relevant passages, and places those passages in the model’s context with their source names. The model is instructed to answer from that evidence and cite it. The retrieval step is ordinary application code: it runs before the model call, and its results are data the runtime chose to supply.",
+              "If the knowledge base is small, you may not need a search index at all. Anthropic notes that a corpus under roughly 200,000 tokens can often be placed in the prompt directly. Retrieval earns its complexity when the material is too large, changes often, or must be filtered per user."
+            ]
+          },
+          {
+            "heading": "Retrieval must respect authorization",
+            "paragraphs": [
+              "A knowledge store is a data system, so the usual access rules apply. Filter by the authenticated user’s tenant and permissions inside the search query, before results reach the model. Asking the model to “ignore documents you should not see” is not access control: once a confidential passage is in the context, it can appear in the answer. OWASP lists cross-tenant leakage through shared vector stores as a top risk for LLM applications.",
+              "Retrieved text is also untrusted. A wiki page can be outdated or contain instructions written by an attacker. Treat passages as evidence to quote and weigh, never as commands that change the agent’s goals or tool permissions."
+            ]
+          },
+          {
+            "heading": "Missing evidence is an answer",
+            "paragraphs": [
+              "Search always returns something, even when nothing relevant exists. Set a relevance threshold, and when no passage clears it, have the application say that the information was not found, ask a clarifying question, or hand off to a person. A confident answer with no supporting source is worse than an honest “I couldn’t find our policy on that.”",
+              "Citations make this checkable. When every claim points to a source, reviewers and users can verify it, and your evaluations can measure whether answers actually match the retrieved evidence."
+            ]
+          }
+        ],
+        "flow": [
+          "Question",
+          "Authorized retrieval",
+          "Evidence with sources",
+          "Grounded answer or “not found”"
+        ],
+        "example": {
+          "title": "A refund-window question",
+          "steps": [
+            { "label": "The question", "detail": "A signed-in customer asks, “How long do I have to return headphones?” The runtime builds a search query from the question." },
+            { "label": "Filtered search", "detail": "The knowledge store searches only public policy documents and this customer’s region, returning the returns-policy passage with a relevance score and its source title." },
+            { "label": "Grounded answer", "detail": "The model answers “30 days from delivery” and cites the returns policy. It does not invent exceptions that the passage does not mention." },
+            { "label": "No evidence", "detail": "For “Do you price-match competitors?” no passage clears the threshold, so the assistant says it could not find a policy and offers to connect the customer with support." }
+          ]
+        },
+        "question": {
+          "prompt": "Search returns a passage from another company’s internal pricing document because both tenants share one index. Where should this be prevented?",
+          "answer": 2,
+          "options": [
+            { "label": "In the system prompt, by telling the model to ignore other tenants", "explanation": "The model already saw the passage. A prompt instruction is not an enforceable boundary and can be overridden or simply ignored." },
+            { "label": "After generation, by scanning the answer for company names", "explanation": "Output scanning may catch some leaks, but the confidential text was already disclosed to the model and may be paraphrased past the filter." },
+            { "label": "In the retrieval query, by filtering on the user’s tenant", "explanation": "Correct. Authorization belongs in the retrieval system, so unauthorized passages never enter the model’s context." }
+          ]
+        },
+        "sources": [
+          { "title": "Anthropic: Introducing Contextual Retrieval", "url": "https://www.anthropic.com/news/contextual-retrieval" },
+          { "title": "OWASP LLM08:2025 Vector and Embedding Weaknesses", "url": "https://genai.owasp.org/llmrisk/llm082025-vector-and-embedding-weaknesses/" },
+          { "title": "Microsoft Learn: Retrieval-augmented generation overview", "url": "https://learn.microsoft.com/en-us/azure/search/retrieval-augmented-generation-overview" }
+        ]
+      },
+      "practice": {
+        "kind": "graph",
+        "labId": "grounding",
+        "title": "Add a knowledge store",
+        "instructions": "Your support agent can already call a tool, but it answers policy questions from memory and sometimes invents them. Add a knowledge store and connect the agent runtime to it so policy passages are retrieved before the model answers. Keep the runtime in control of tool access. Then step through the simulated request.",
+        "explanation": "The runtime, not the model, calls the knowledge store, applies access filters, and passes retrieved passages with their sources into the model’s context. Knowledge is evidence for the answer, not permission to act, so the tool path stays runtime-controlled and retrieved text is never treated as instructions."
+      }
+    },
+    {
+      "id": "retrieval-quality",
+      "title": "Improve retrieval quality",
+      "notes": {
+        "topic": "Knowledge & memory",
+        "minutes": 5,
+        "lead": "Most bad RAG answers are retrieval failures: the right passage existed but was never found, or was found without the context that made it meaningful. Improving retrieval means working through a pipeline in order, because each stage can only use what the previous one produced.",
+        "sections": [
+          {
+            "heading": "Prepare the corpus",
+            "paragraphs": [
+              "Ingestion collects documents from their sources, extracts clean text, and records metadata such as owner, tenant, region, version, and last-updated date. That metadata is what later lets you filter by permission and prefer current documents, so capture it before anything else.",
+              "Chunking splits each document into passages small enough to retrieve precisely but large enough to stand on their own. A chunk that says “Revenue grew 3% over the previous quarter” is useless if it lost which company and which quarter. Anthropic’s contextual retrieval technique prepends a short, chunk-specific explanation of where the chunk sits in its document before embedding and keyword indexing; it reports that contextual embeddings combined with contextual BM25 reduced failed retrievals by 49%."
+            ]
+          },
+          {
+            "heading": "Index, retrieve, rerank",
+            "paragraphs": [
+              "Indexing turns chunks into searchable form: embeddings for semantic similarity and, often, a keyword index such as BM25 for exact terms like product codes. OpenAI’s vector stores chunk, embed, and index files automatically and support attribute filters, ranking options, and hybrid search that balances semantic and keyword matches.",
+              "Retrieval runs the query with filters applied and returns a generous candidate set, perhaps the top 50. Reranking then rescores those candidates with a slower, more accurate model and keeps the best few for the context window. Anthropic reports that adding reranking to contextual retrieval cut failed retrievals by 67%."
+            ]
+          },
+          {
+            "heading": "Evaluate the evidence",
+            "paragraphs": [
+              "Before generation, check whether the kept passages actually support an answer: do they clear a score threshold, come from current documents, and agree with each other? If they conflict or fall short, the application should say so rather than letting the model pick one.",
+              "Measure retrieval separately from answer quality. Build a set of questions with known source passages and track how often the right passage appears in the final results. That tells you which stage to fix, instead of rewriting prompts to compensate for a chunking bug."
+            ]
+          }
+        ],
+        "flow": [
+          "Ingest with metadata",
+          "Chunk with context",
+          "Index",
+          "Retrieve with filters",
+          "Rerank",
+          "Evaluate evidence"
+        ],
+        "example": {
+          "title": "Finding the right warranty clause",
+          "steps": [
+            { "label": "Symptom", "detail": "Users asking about the X200 warranty get the X100 terms. Logs show the right clause exists but never reaches the model." },
+            { "label": "Diagnosis", "detail": "Each warranty chunk starts with “Coverage lasts 24 months” and never names the product, so embeddings for X100 and X200 chunks are nearly identical." },
+            { "label": "Fix the earlier stage", "detail": "Chunks get a prefix naming the product and document, and the keyword index now matches the exact code “X200”. Hybrid retrieval returns both versions as candidates." },
+            { "label": "Rerank and check", "detail": "The reranker puts the X200 clause first. The evidence check confirms the document is current, and the retrieval test set now finds the right clause for every product question." }
+          ]
+        },
+        "question": {
+          "prompt": "The correct passage is in the index but ranks 30th for most queries, and only the top 5 enter the context. Which change targets the problem most directly?",
+          "answer": 1,
+          "options": [
+            { "label": "Tell the model to think harder about the passages it receives", "explanation": "The model never sees passage 30. Prompting cannot fix evidence that was filtered out before generation." },
+            { "label": "Retrieve more candidates and rerank them before keeping five", "explanation": "Correct. A wider candidate set captures the passage, and a reranker can promote it into the small set that fits the context window." },
+            { "label": "Re-ingest every document without metadata to simplify the index", "explanation": "Removing metadata weakens permission and freshness filtering and does nothing to improve ranking." }
+          ]
+        },
+        "sources": [
+          { "title": "Anthropic: Introducing Contextual Retrieval", "url": "https://www.anthropic.com/news/contextual-retrieval" },
+          { "title": "OpenAI: Retrieval", "url": "https://platform.openai.com/docs/guides/retrieval" }
+        ]
+      },
+      "practice": {
+        "kind": "sequence",
+        "title": "Order the retrieval pipeline",
+        "instructions": "A team is rebuilding the knowledge pipeline for its support agent. Put the stages in the order they must run, from raw documents to evidence that is ready for the model. Each stage depends on the output of the one before it.",
+        "items": [
+          { "id": "rerank", "label": "Rerank the candidates and keep the best few" },
+          { "id": "chunk", "label": "Split documents into self-contained, contextualized chunks" },
+          { "id": "evaluate", "label": "Check that kept passages are relevant, current, and consistent" },
+          { "id": "ingest", "label": "Ingest documents with tenant, version, and date metadata" },
+          { "id": "retrieve", "label": "Retrieve a candidate set with permission filters applied" },
+          { "id": "index", "label": "Index chunks with embeddings and a keyword index" }
+        ],
+        "correctOrder": ["ingest", "chunk", "index", "retrieve", "rerank", "evaluate"],
+        "explanation": "Metadata must be captured at ingestion so later stages can filter on it. Chunks must exist before they can be indexed, and an index must exist before it can be searched. Reranking needs a candidate set to rescore, and evidence can only be judged once the final passages are chosen. Fixing a stage early in the pipeline often matters more than tuning a later one."
+      }
+    },
+    {
+      "id": "memory",
+      "title": "Remember the conversation",
+      "notes": {
+        "topic": "Knowledge & memory",
+        "minutes": 4,
+        "lead": "Each model request is independent. If a user asks “what about that order?”, the model only knows which order they mean if your application sends the earlier turns again. Conversation memory is application state, and like any state it needs an owner, a scope, and a retention rule.",
+        "sections": [
+          {
+            "heading": "State lives outside the model",
+            "paragraphs": [
+              "OpenAI’s documentation describes text generation requests as stateless: a multi-turn conversation works because prior messages are supplied as input again, either by your code or by a provider-managed conversation object. Either way, someone stores the history and decides what to send.",
+              "In an agent, the runtime owns that job. At the start of a turn it loads the session’s state, includes the relevant parts in the context, and after the turn it saves what changed. LangGraph calls this short-term, thread-scoped memory and persists it with a checkpointer so a conversation can resume later."
+            ]
+          },
+          {
+            "heading": "Scope by user and session",
+            "paragraphs": [
+              "Key every read and write by the authenticated user and the session ID that the server issued, not by an ID the client chose or the model wrote. A memory lookup by session ID alone lets anyone who guesses or copies that ID read another person’s conversation. The user never talks to the memory store directly; the runtime does, after authentication.",
+              "Keep conversation memory separate from the knowledge store. Knowledge is shared reference material with document-level permissions. Memory is private interaction state that belongs to one user and one session, with its own retention and deletion rules."
+            ]
+          },
+          {
+            "heading": "Retain deliberately",
+            "paragraphs": [
+              "Long histories eventually exceed the context window and degrade answer quality before they do. Keep recent turns verbatim and replace older ones with a summary, or trim tool outputs that are no longer needed. Store the minimum useful facts, such as an order reference, rather than raw payment details or secrets.",
+              "Give session state an expiry and a delete path. When a user deletes a conversation or a session times out, the stored history, summaries, and checkpoints for it should go too."
+            ]
+          }
+        ],
+        "flow": [
+          "Authenticate user",
+          "Load this session’s state",
+          "Build context",
+          "Run the turn",
+          "Save minimal state"
+        ],
+        "example": {
+          "title": "Resolving “that order”",
+          "steps": [
+            { "label": "First turn", "detail": "A signed-in user asks about order #42. After the turn, the runtime saves the order reference to memory keyed by that user and session." },
+            { "label": "Follow-up", "detail": "The user writes “Can I still return that order?” The runtime authenticates the request and loads only this user’s session, which contains order #42." },
+            { "label": "Grounded reply", "detail": "With the order resolved from memory and the returns policy retrieved from knowledge, the model answers about order #42 specifically and cites the policy." },
+            { "label": "Isolation check", "detail": "Another user sends the same session ID copied from a shared link. The server rejects the lookup because the session belongs to a different authenticated user." }
+          ]
+        },
+        "question": {
+          "prompt": "A memory service looks up history using only a session ID that the browser sends. What is the main risk?",
+          "answer": 0,
+          "options": [
+            { "label": "Anyone with the ID can read that conversation", "explanation": "Correct. The lookup must also check that the session belongs to the authenticated user; an identifier is not an authorization check." },
+            { "label": "The model will forget earlier turns", "explanation": "The history is still loaded. The problem is who it is loaded for, not whether it is loaded." },
+            { "label": "The context window will overflow faster", "explanation": "Context size depends on how much history you send, not on how the session is keyed." }
+          ]
+        },
+        "sources": [
+          { "title": "OpenAI: Conversation state", "url": "https://platform.openai.com/docs/guides/conversation-state" },
+          { "title": "LangGraph: Memory overview", "url": "https://docs.langchain.com/oss/python/langgraph/memory" }
+        ]
+      },
+      "practice": {
+        "kind": "graph",
+        "labId": "memory",
+        "title": "Add session memory",
+        "instructions": "Your grounded agent forgets everything between turns, so follow-ups like “what about that order?” fail. Add session memory and connect the agent runtime to it. Keep the knowledge store and tool path working, and do not let the user reach memory directly. Then step through the simulated conversation.",
+        "explanation": "The runtime reads and writes session memory after authenticating the user, so state is scoped to that user and session. Memory holds private conversation state while the knowledge store holds shared reference material, and each has its own access rules, retention limit, and deletion path."
+      }
+    },
+    {
+      "id": "long-term-memory",
+      "title": "Design long-term memory",
+      "notes": {
+        "topic": "Knowledge & memory",
+        "minutes": 5,
+        "lead": "Session memory ends with the conversation. Long-term memory carries facts across sessions: a user’s preferred language, a project’s conventions, a lesson learned from a failed task. It makes an agent more useful over time, and it also creates a store of personal data that can go stale, be poisoned, or outlive its welcome.",
+        "sections": [
+          {
+            "heading": "Decide what deserves to be remembered",
+            "paragraphs": [
+              "LangGraph separates long-term memory into semantic memory (facts about a user or domain), episodic memory (past experiences, often used as examples), and procedural memory (instructions the agent follows). Each needs a namespace, such as a user or organization ID, so one user’s memories never load for another.",
+              "Store stable, useful facts the user would expect you to keep, with where they came from and when. Do not store secrets, payment data, or one-off details. Anthropic’s memory tool guidance says your application should strip sensitive data before writing, cap file sizes, and validate every path, because the application, not the model, executes each memory operation."
+            ]
+          },
+          {
+            "heading": "Memory is a claim, not the truth",
+            "paragraphs": [
+              "A memory records what was believed at some moment. The user may have moved, the policy may have changed, or the memory may have been written from a misunderstanding or an injected instruction in a document. When a memory conflicts with an authoritative system, such as the account database, the system of record wins and the memory should be corrected.",
+              "Before acting on a memory with consequences, verify it. Use a remembered shipping address as a suggestion to confirm, not as permission to ship. Treat memories written from untrusted content with the same suspicion as retrieved text."
+            ]
+          },
+          {
+            "heading": "Expire and delete",
+            "paragraphs": [
+              "Give memories an expiry or a review date, and periodically delete ones that have not been used. Anthropic’s guidance suggests removing memory files that have not been accessed for a long time.",
+              "Users should be able to see and delete what is remembered about them, and deletion must reach every copy: the memory store, its search index, summaries, and backups on their normal schedule."
+            ]
+          }
+        ],
+        "flow": [
+          "Candidate fact",
+          "Filter sensitive data",
+          "Store with scope and source",
+          "Verify before acting",
+          "Expire or delete"
+        ],
+        "example": {
+          "title": "A remembered preference goes stale",
+          "steps": [
+            { "label": "Write", "detail": "A user says “Always send invoices to billing@acme.example.” The agent stores this under the user’s namespace with the date and the conversation as its source." },
+            { "label": "Reuse", "detail": "Weeks later, in a new session, the agent loads the preference and drafts an invoice email to that address, saving the user a step." },
+            { "label": "Conflict", "detail": "The account system now lists a different billing contact. The agent treats the system of record as authoritative, asks the user to confirm, and updates the memory." },
+            { "label": "Delete", "detail": "The user later asks the agent to forget their billing details. The runtime deletes the memory and its index entry and confirms what was removed." }
+          ]
+        },
+        "question": {
+          "prompt": "A long-term memory says the user lives in Toronto, but their verified account profile now says Vancouver. What should the agent do?",
+          "answer": 2,
+          "options": [
+            { "label": "Use Toronto, because memory reflects what the user told the agent", "explanation": "Memories go stale. Acting on an outdated memory over a verified record can ship to the wrong place." },
+            { "label": "Keep both and let the model choose per request", "explanation": "Leaving a known conflict for the model to resolve makes behavior unpredictable and hides the error." },
+            { "label": "Trust the profile and correct or retire the memory", "explanation": "Correct. The system of record is authoritative; memory is a helpful claim that should be updated when it conflicts." }
+          ]
+        },
+        "sources": [
+          { "title": "LangGraph: Memory overview", "url": "https://docs.langchain.com/oss/python/langgraph/memory" },
+          { "title": "Anthropic: Memory tool", "url": "https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/memory-tool" }
+        ]
+      },
+      "practice": {
+        "kind": "scenario",
+        "title": "Design a cross-session memory policy",
+        "instructions": "You are adding long-term memory to a customer support agent that serves many companies. Users want it to remember preferences between conversations. Select every decision that belongs in the memory design, and leave out the unsafe or unnecessary ones.",
+        "options": [
+          { "label": "Namespace every memory by tenant and authenticated user", "feedback": "Yes. Scoping reads and writes by tenant and user prevents one customer’s memories from loading for another." },
+          { "label": "Record each memory’s source and the date it was written", "feedback": "Yes. Provenance and age let you judge staleness, trace bad memories, and correct them." },
+          { "label": "Store full card numbers so repeat purchases are faster", "feedback": "No. Payment data and secrets should be filtered out before writing; use the payment system’s own tokenized records instead." },
+          { "label": "Prefer the system of record when a memory conflicts with it", "feedback": "Yes. Memory is a claim, not the truth; authoritative data wins and the memory is corrected." },
+          { "label": "Keep memories forever so the agent never loses context", "feedback": "No. Unbounded retention accumulates stale and sensitive data. Set expiry and remove unused memories." },
+          { "label": "Let users view and delete what is remembered about them", "feedback": "Yes. Visibility and deletion that reaches the store and its indexes give users control over their data." },
+          { "label": "Save any instruction found in retrieved documents as procedural memory", "feedback": "No. Retrieved text is untrusted; persisting its instructions would turn a one-time injection into lasting behavior." }
+        ],
+        "correct": [0, 1, 3, 5],
+        "explanation": "A sound long-term memory design scopes memories to the right tenant and user, records provenance, defers to authoritative systems on conflict, and gives users visibility and deletion. It filters sensitive data, expires what is no longer useful, and never persists instructions from untrusted content."
+      }
+    }
+  ]
+}

@@ -1,0 +1,55 @@
+{
+  "id": "capstone",
+  "title": "Design a production agent system",
+  "notes": {
+    "topic": "Evaluation & capstone",
+    "minutes": 5,
+    "lead": "You are designing a support agent that can explain policy and propose refunds. It must protect customer data, survive duplicate jobs, pause sensitive actions, and leave enough evidence to investigate a failure. Bring the course together in one architecture—not a promise that a diagram makes a system production-ready.",
+    "sections": [
+      {
+        "heading": "Turn requirements into boundaries",
+        "paragraphs": [
+          "Start with the smallest design that meets the requirements: one bounded runtime, not a team of agents by default. Authenticate the request at a policy gateway before accepting it into a queue. The worker owns the model loop, loads authorized evidence and session-scoped memory, and keeps tool credentials outside model context.",
+          "A model proposal is untrusted input. In this exercise, every tool action passes through an approval checkpoint bound to the exact operation and arguments. The tool still validates resource access and permissions. Calls and dependencies are drawn as arrows; responses are implicit. A direct runtime-to-tool arrow would bypass the checkpoint, even if the prompt says to ask permission."
+        ]
+      },
+      {
+        "heading": "Make the design survivable",
+        "paragraphs": [
+          "Assume that messages can be delivered twice and a successful tool response can be lost. Keep a durable task identifier, persist checkpoints, and reuse an idempotency key for the same write. Bound worker steps, cost, time, concurrency, and retries. Define cancellation and a dead-letter path instead of leaving failed work in an endless loop.",
+          "Connect the runtime to redacted telemetry so intake, retrieval, approvals, and tool calls can be correlated. Evaluate representative tasks and failure cases before a staged rollout. This canvas checks the architecture’s logical dependencies only: it cannot verify your real access controls, storage isolation, checkpoint transactions, or refund API. Those require implementation and integration tests."
+        ]
+      }
+    ],
+    "flow": ["Authenticate & queue", "Reason with evidence", "Approve & execute", "Observe & evaluate"],
+    "example": {
+      "title": "A refund job is delivered twice",
+      "steps": [
+        { "label": "Accept", "detail": "The gateway authenticates the customer and accepts one task. The queue later delivers that task to a worker more than once." },
+        { "label": "Resume", "detail": "The worker loads the persisted checkpoint and approval for the exact refund. It does not ask the model to invent whether the earlier action succeeded." },
+        { "label": "Verify", "detail": "The tool receives the same idempotency key and returns the existing result without repeating the refund. A redacted trace records the retry, and an integration test checks the single side effect." }
+      ]
+    },
+    "question": {
+      "prompt": "Your capstone diagram passes every local check. What does that establish—and what still needs verification?",
+      "answer": 1,
+      "options": [
+        { "label": "The real service is secure and production-ready.", "explanation": "A diagram cannot verify an implementation. Real authorization, isolation, durability, and failure behavior still need tests and operational evidence." },
+        { "label": "The teaching architecture is connected correctly; implementation and failure tests are still required.", "explanation": "Exactly. The local checks establish logical dependencies, not production guarantees. Build the system, then test its actual boundaries and failure behavior." },
+        { "label": "The model will never produce an unsafe proposal.", "explanation": "Models can still propose unsafe actions. The runtime and tools must reject them using controls outside the model, regardless of diagram correctness." }
+      ]
+    },
+    "sources": [
+      { "title": "Anthropic: Building effective agents", "url": "https://www.anthropic.com/engineering/building-effective-agents" },
+      { "title": "OpenTelemetry: Traces", "url": "https://opentelemetry.io/docs/concepts/signals/traces/" },
+      { "title": "OpenAI: Function calling", "url": "https://platform.openai.com/docs/guides/function-calling" }
+    ]
+  },
+  "practice": {
+    "kind": "graph",
+    "labId": "capstone",
+    "title": "Build the complete support-agent architecture",
+    "instructions": "Start from the user alone. Build a logical architecture that authenticates intake before queueing work, gives a bounded runtime access to its model, authorized knowledge and scoped memory, routes every sensitive tool action through human approval, and records redacted traces and evaluation signals. Check the design, repair missing or bypass connections, and follow the complete simulated request. Responses are implicit in the arrows; no real API is called.",
+    "explanation": "The architecture separates intake, durable work, reasoning, evidence, state, approval, actions, and observation. Its critical property is that there is no shortcut around the enforced approval path. A real implementation still needs tool-side authorization, isolation, idempotency, checkpointing, bounded execution, failure tests, evaluations, and staged deployment."
+  }
+}
