@@ -6,8 +6,8 @@
       "id": "tool-contracts",
       "title": "Design a tool contract",
       "notes": {
-        "topic": "Tool contracts",
-        "minutes": 3,
+        "topic": "Tools & integrations",
+        "minutes": 4,
         "lead": "A tool contract tells the model what it can propose and tells the application what it can safely execute. A name and description help the model choose; the handler still has to check the request and enforce the rules.",
         "sections": [
           {
@@ -59,7 +59,7 @@
           { "label": "Require exactly one typed hold ID for the cancellation proposal.", "feedback": "A narrow input identifies the intended hold without introducing model-chosen identity or extra commands." },
           { "label": "Use the session identity and verify ownership of the hold at execution.", "feedback": "Permission must come from authenticated context and the actual record, regardless of how plausible the proposal looks." },
           { "label": "Treat any nonempty cancellation message as a successful outcome.", "feedback": "An error message can also be nonempty. Separate a confirmed cancellation from a typed failure." },
-          { "label": "Define a typed cancellation receipt and replay it for the same action key.", "feedback": "A receipt records the confirmed outcome, and a server-enforced action key lets a duplicate request return it without another write." }
+          { "label": "Define a typed cancellation receipt and replay it for the same idempotency key.", "feedback": "A receipt records the confirmed outcome, and a server-enforced idempotency key lets a duplicate request return it without another write." }
         ],
         "correct": [1, 2, 4]
       }
@@ -68,8 +68,8 @@
       "id": "agent-loop",
       "title": "Build the agent loop",
       "notes": {
-        "topic": "Runtime control",
-        "minutes": 3,
+        "topic": "Tools & integrations",
+        "minutes": 4,
         "lead": "Tool calling is a conversation between the runtime and the model, with real operations in between. The model chooses what to propose next; the runtime is the part of your application that decides whether another step is allowed.",
         "sections": [
           {
@@ -122,8 +122,8 @@
       "id": "tool-failures",
       "title": "Handle tool failures",
       "notes": {
-        "topic": "Safe recovery",
-        "minutes": 3,
+        "topic": "Tools & integrations",
+        "minutes": 4,
         "lead": "A timeout tells you that a reply did not arrive in time. It does not tell you whether the service made a change. Recovery starts by separating the status of the connection from the outcome of the operation.",
         "sections": [
           {
@@ -167,7 +167,7 @@
       "practice": {
         "kind": "sequence",
         "title": "Recover a write without duplicating it",
-        "instructions": "A library hold request with a recorded operation key timed out. The service offers status lookup and guarantees same-key deduplication within a retention window. Order the recovery steps from the timeout through the user report.",
+        "instructions": "A library hold request with a recorded idempotency key timed out. The service offers status lookup and guarantees same-key deduplication within a retention window. Order the recovery steps from the timeout through the user report.",
         "explanation": "Treat the write as uncertain, reconcile against the original key, then use the status to decide whether replay is needed and safe. Report only what the recovery established.",
         "items": [
           { "id": "report", "label": "Report the resulting receipt or state that the outcome is still unknown." },
@@ -182,8 +182,8 @@
       "id": "integration-boundaries",
       "title": "Connect tools with MCP",
       "notes": {
-        "topic": "MCP boundaries",
-        "minutes": 3,
+        "topic": "Tools & integrations",
+        "minutes": 4,
         "lead": "Model Context Protocol, or MCP, gives applications a common way to discover and invoke tools offered by other services. It standardizes the conversation between software components. It does not give a model permission to use everything those components advertise.",
         "sections": [
           {
