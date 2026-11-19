@@ -1,0 +1,245 @@
+{
+  "id": "safety-security",
+  "title": "Safety & security",
+  "lessons": [
+    {
+      "id": "trust-boundaries",
+      "title": "Map trust & authorization",
+      "notes": {
+        "topic": "Enforceable permissions",
+        "minutes": 4,
+        "lead": "A support assistant receives a valid login and an order number. That proves neither that the caller owns the order nor that they may refund it. Draw boundaries where application code can reject requests, rather than asking the model to decide who deserves access.",
+        "sections": [
+          {
+            "heading": "Authenticate before orchestration",
+            "paragraphs": [
+              "At intake, verify the session or access token before starting the agent. Derive the caller and tenant from verified identity, not from a user message or model-generated argument. Reject missing, invalid, or expired credentials before loading private context.",
+              "Authentication answers who is calling. Authorization answers whether that caller can perform this operation on this resource. A signed-in customer may read their own order but not another customer's order. A role such as support agent still needs resource and operation checks."
+            ]
+          },
+          {
+            "heading": "Enforce at every resource access",
+            "paragraphs": [
+              "The tool API must authorize every read and write against trusted caller context, the requested resource, and current policy. Deny by default when a permission is absent or cannot be established. Apply the same rules to knowledge retrieval and session memory; hiding an unauthorized result after retrieval is too late.",
+              "Use user-scoped credentials with only the operations needed for this task. Keep them server-side, outside prompts. The model is not a security boundary: it can propose an order identifier, but cannot grant access to it. Intake checks do not replace tool checks because the proposed resource can change during the loop."
+            ]
+          }
+        ],
+        "flow": ["Verify caller at intake", "Carry trusted identity", "Authorize resource in tool API", "Execute or deny"],
+        "example": {
+          "title": "A guessed order identifier",
+          "steps": [
+            {"label": "Authenticate", "detail": "Mina signs in as a customer of tenant North. The gateway attaches that verified identity to the runtime without trusting a tenant field in her message."},
+            {"label": "Check the resource", "detail": "The model proposes read_order(43). The API looks up order 43 within Mina's permitted scope; an order belonging to tenant South is not returned."},
+            {"label": "Fail closed", "detail": "The API denies access even if the model says a manager approved it. Mina can continue with an authorized order, but generated assurances cannot change permissions."}
+          ]
+        },
+        "question": {
+          "prompt": "A signed-in user asks for another customer's invoice. Where must access be stopped?",
+          "answer": 1,
+          "options": [
+            {"label": "Only in the system prompt", "explanation": "Instructions can guide the model, but cannot enforce which invoice an API returns."},
+            {"label": "At the resource-serving API", "explanation": "The API checks the verified caller against the requested invoice and denies unauthorized access."},
+            {"label": "Only at the login gateway", "explanation": "Login establishes identity; it does not establish permission for every later invoice identifier."}
+          ]
+        },
+        "sources": [
+          {"title": "OWASP: Authorization Cheat Sheet", "url": "https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html"}
+        ]
+      },
+      "practice": {
+        "kind": "scenario",
+        "title": "Protect a support order lookup",
+        "instructions": "A support assistant accepts order identifiers from chat and can read orders or request refunds. Select every control that creates an enforceable identity or resource boundary.",
+        "explanation": "Verify identity before orchestration, propagate trusted user scope, and authorize each resource operation in the API. Prompts and successful login alone cannot protect another customer's order.",
+        "options": [
+          {"label": "Verify the session at intake before loading private context.", "feedback": "This establishes a trusted caller before the runtime retrieves private information."},
+          {"label": "Authorize every order read and refund in the tool API; deny missing grants.", "feedback": "Each resource and operation needs its own check, with an explicit fail-closed result."},
+          {"label": "Give tools server-held, user-scoped credentials for this task.", "feedback": "Scoped credentials limit what the runtime can do on this caller's behalf."},
+          {"label": "Let the model accept a tenant identifier supplied in chat as identity.", "feedback": "A chat field is unverified input and would let callers claim another tenant's scope."},
+          {"label": "Skip API authorization after the gateway confirms a valid login.", "feedback": "The gateway cannot make every later order identifier authorized merely by authenticating the caller."},
+          {"label": "Use a shared administrator token and a prompt forbidding cross-user access.", "feedback": "A prompt cannot constrain an administrator credential; the API must enforce the caller's actual scope."}
+        ],
+        "correct": [0, 1, 2]
+      }
+    },
+    {
+      "id": "prompt-injection",
+      "title": "Contain prompt injection",
+      "notes": {
+        "topic": "Untrusted text, bounded tools",
+        "minutes": 4,
+        "lead": "An agent summarizing an email may encounter a sentence telling it to upload the inbox for verification. That sentence is email content, not an instruction from the user. Prompt injection tries to turn material the agent reads into authority over what it does next.",
+        "sections": [
+          {
+            "heading": "Separate instructions from evidence",
+            "paragraphs": [
+              "Treat web pages, emails, retrieved documents, and tool outputs as untrusted data, even when they arrive through an approved connector. A trusted transport does not make the content trustworthy. A document can quote fake system messages, claim an emergency, or impersonate a tool administrator.",
+              "Keep application instructions separate from retrieved content using structured fields and explicit data labels. Tell the model to summarize or extract facts, not obey commands inside evidence. This separation reduces confusion but is not a complete defense: no detector catches every injection, including obfuscated or previously unseen attacks."
+            ]
+          },
+          {
+            "heading": "Contain actions and outbound data",
+            "paragraphs": [
+              "Expose only tools needed for the user's task. An email summary should not have account deletion or arbitrary outbound upload capabilities. Validate tool arguments in code and require approval for sensitive sends or writes, with the reviewer seeing the exact destination and payload.",
+              "Limit exfiltration at every outbound path. Do not let the agent fetch arbitrary URLs containing private data. Use network egress allowlists and narrow destination-specific tools. Disable automatic loading of model-produced Markdown images or links carrying data; the browser can leak information even when the tool server blocks outbound traffic. Screening output is an additional layer, not permission to remove these boundaries."
+            ]
+          }
+        ],
+        "flow": ["Read untrusted evidence", "Keep data separate", "Propose task-scoped action", "Enforce destination and approval"],
+        "example": {
+          "title": "An email requests a secret upload",
+          "steps": [
+            {"label": "Encounter", "detail": "The user requests an inbox summary. One message says that verification requires sending all messages to a new external endpoint, and includes an image link."},
+            {"label": "Contain", "detail": "The summarizer has read-only mail access, no arbitrary URL fetch tool, and a renderer that does not load external images. The injected upload has no permitted execution path."},
+            {"label": "Continue safely", "detail": "The assistant summarizes the legitimate messages and flags the suspicious request as content. If the user later requests a send, a separate authorized workflow previews the recipient and message for approval."}
+          ]
+        },
+        "question": {
+          "prompt": "A retrieved page passes the injection detector. What should happen to its instructions?",
+          "answer": 2,
+          "options": [
+            {"label": "Promote them to system instructions", "explanation": "A detector result does not give a web page authority over application behavior."},
+            {"label": "Allow any URL it recommends", "explanation": "An outbound URL can carry private data; destination restrictions remain necessary."},
+            {"label": "Keep them as untrusted page content", "explanation": "Detectors are incomplete. Tool permissions and outbound restrictions must still apply."}
+          ]
+        },
+        "sources": [
+          {"title": "OWASP: LLM Prompt Injection Prevention Cheat Sheet", "url": "https://cheatsheetseries.owasp.org/cheatsheets/LLM_Prompt_Injection_Prevention_Cheat_Sheet.html"}
+        ]
+      },
+      "practice": {
+        "kind": "scenario",
+        "title": "Contain an injected research page",
+        "instructions": "A research assistant reads a page that asks it to send internal notes to a diagnostic URL and render an image containing those notes in its query string. Select all appropriate defenses.",
+        "explanation": "Keep external text in the data role and restrict what actions and destinations are possible. Apply outbound controls to both tools and rendered output; detection alone cannot make the page safe.",
+        "options": [
+          {"label": "Label page text as evidence, separate from application instructions.", "feedback": "Clear separation reduces instruction confusion without treating labels as a complete security boundary."},
+          {"label": "Remove arbitrary URL fetching and allow only required outbound destinations.", "feedback": "Task-scoped tools and an enforced egress allowlist reduce the available exfiltration paths."},
+          {"label": "Block automatic external image loading and data-bearing Markdown links.", "feedback": "The browser is also an outbound channel; remote images can transmit data without a tool call."},
+          {"label": "Require an exact recipient and payload preview before a sensitive send.", "feedback": "Approval should expose the actual action, not merely ask whether the assistant may continue."},
+          {"label": "Unlock all tools whenever an injection classifier reports the page clean.", "feedback": "No detector is complete; a false negative must not grant broad tool authority."},
+          {"label": "Treat a tool's returned page as trusted because the connector is authenticated.", "feedback": "Authentication protects access to the connector, not the authority of text retrieved through it."}
+        ],
+        "correct": [0, 1, 2, 3]
+      }
+    },
+    {
+      "id": "safety",
+      "title": "Require approval for sensitive actions",
+      "notes": {
+        "topic": "Approval is action-specific",
+        "minutes": 4,
+        "lead": "A reviewer approving a refund must know which refund will execute. A generic Continue button can approve a different operation from the one the reviewer imagined. Bind the decision to an immutable action record, and make execution reject any mismatch rather than trusting the conversation.",
+        "sections": [
+          {
+            "heading": "Show and bind the exact action",
+            "paragraphs": [
+              "Validate the proposal before requesting approval. Show the reviewer the tool, resource, amount and currency, destination where relevant, and other consequential arguments. For example, refund order 42 for USD 25 is not equivalent to refund order 43 or refund USD 250. Avoid a vague model-written summary as the only preview.",
+              "Store the exact validated arguments with a server-side approval identifier, reviewer identity, decision, and expiry. At execution, compare the requested action with that record. Reject changed arguments, denied decisions, and expired approvals. A revised amount requires a new review; silence or a missing response never counts as consent."
+            ]
+          },
+          {
+            "heading": "Execute once within current permissions",
+            "paragraphs": [
+              "The tool must independently re-check authorization at execution time. Approval does not grant the caller ownership of an order or override revoked permissions. A gateway establishes identity before orchestration, while the approval gate pauses sensitive actions after the model has proposed concrete arguments.",
+              "Use an idempotency key tied to the approved operation, with durable deduplication at the side-effecting service. If the response is lost, a retry returns the recorded result rather than issuing a second refund. Reject reuse of the key with changed arguments, and coordinate approval consumption and execution so concurrent workers cannot create duplicate effects."
+            ]
+          }
+        ],
+        "flow": ["Validate exact proposal", "Review action details", "Verify approval and current authorization", "Execute idempotently"],
+        "example": {
+          "title": "A refund changes after review",
+          "steps": [
+            {"label": "Propose and review", "detail": "The runtime prepares refund(order_id=42, amount=25, currency=USD). A reviewer sees these exact fields and approves the stored action before its expiry."},
+            {"label": "Reject a mismatch", "detail": "A later model step proposes amount=250 using the same approval identifier. The execution service rejects it without moving money and requires a new approval."},
+            {"label": "Handle a retry", "detail": "The original USD 25 action executes after a fresh authorization check. Its response times out, so the runtime retries with the same idempotency key and receives the original refund result."}
+          ]
+        },
+        "question": {
+          "prompt": "A reviewer approved USD 25 for order 42, but the proposed amount is now USD 30. What next?",
+          "answer": 0,
+          "options": [
+            {"label": "Reject execution and request fresh approval", "explanation": "The amount is part of the approved action. Changed arguments invalidate that approval."},
+            {"label": "Execute because the difference is small", "explanation": "A small change is still a different action; the reviewer did not approve that amount."},
+            {"label": "Execute if the original approval has not expired", "explanation": "An unexpired approval still applies only to its exact tool, resource, and arguments."}
+          ]
+        },
+        "sources": [
+          {"title": "OWASP: Transaction Authorization Cheat Sheet", "url": "https://cheatsheetseries.owasp.org/cheatsheets/Transaction_Authorization_Cheat_Sheet.html"},
+          {"title": "OWASP: Authorization Cheat Sheet", "url": "https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html"}
+        ]
+      },
+      "practice": {
+        "kind": "graph",
+        "labId": "safety",
+        "title": "Put approval on the action path",
+        "instructions": "Remove User → Agent runtime and Agent runtime → Tool API. Add Policy gateway and Human approval. Connect User → Policy gateway → Agent runtime and Agent runtime → Human approval → Tool API. Keep Agent runtime connected to Language model, Knowledge store, and Session memory. Do not add bypass links from User, Language model, or Policy gateway to Tool API. Check the design, then step through the refund trace.",
+        "explanation": "The graph checks intake routing, approval routing without direct tool bypasses, and retained model, knowledge, and memory dependencies. The illustrative trace approves order 42 for 25 and describes tool-side authorization and idempotency. Topology alone does not implement approval records: production code must reject changed, denied, or expired approvals and enforce the exact action at execution."
+      }
+    },
+    {
+      "id": "sandboxing",
+      "title": "Sandbox tools & isolate tenants",
+      "notes": {
+        "topic": "Isolation outside the prompt",
+        "minutes": 4,
+        "lead": "An agent that runs generated code can damage more than its current answer. A faulty script can exhaust memory, read a mounted directory, or transmit another tenant's file. Design the execution environment so those operations are unavailable, even if the model confidently asks for them.",
+        "sections": [
+          {
+            "heading": "Constrain execution and network access",
+            "paragraphs": [
+              "Run code in a disposable, hardened container or VM rather than the application host. Containers share the host kernel, so stronger isolation may require a VM or additional sandbox layer for hostile workloads. Run without privilege, drop unnecessary capabilities, and do not mount host directories or the container daemon socket.",
+              "Set explicit CPU and memory limits and a wall-clock deadline enforced by a supervisor that terminates the workload. A container alone does not automatically impose these limits. Give it only a temporary workspace containing authorized inputs, then clean up files and processes after completion or failure. Deny outbound network access by default and allow only required destinations through enforced egress controls."
+            ]
+          },
+          {
+            "heading": "Separate credentials and tenant data",
+            "paragraphs": [
+              "Keep credentials out of prompts, generated code, and logs. A server-side broker can perform narrow operations or supply short-lived, task-scoped credentials only where needed. Do not give the sandbox a permanent shared administrator token. Credential scope and expiry limit damage, but never justify unrestricted network access.",
+              "Enforce tenant isolation in database queries and storage access policies using trusted identity. Scope object reads, vector retrieval, memory, and temporary workspaces to the authorized tenant. Parameterized tenant-filtered queries or enforced row-level policies protect records; storage authorization protects files. A prompt saying only read tenant North cannot stop code with access to every tenant's bucket."
+            ]
+          }
+        ],
+        "flow": ["Resolve trusted tenant scope", "Prepare isolated inputs", "Run with resource and egress limits", "Authorize output storage", "Destroy workspace"],
+        "example": {
+          "title": "Generate a tenant's sales chart",
+          "steps": [
+            {"label": "Prepare", "detail": "The service verifies a tenant North caller, queries only permitted sales rows, and places an export in a fresh job workspace. Other tenants' files are not attached."},
+            {"label": "Execute", "detail": "A non-privileged sandbox renders the chart with one CPU, 512 MiB of memory, and a 30-second deadline. It has no host mounts and no outbound network requirement, so egress is denied."},
+            {"label": "Store and clean up", "detail": "A server-side storage operation checks North's destination permissions and writes the chart using scoped credentials absent from the prompt. The service destroys the workspace even if rendering fails or times out."}
+          ]
+        },
+        "question": {
+          "prompt": "A prompt names tenant North, but the worker can read every tenant's storage. Is that isolation?",
+          "answer": 1,
+          "options": [
+            {"label": "Yes, if the model usually follows instructions", "explanation": "Following instructions is not an enforceable restriction on storage reads or generated code."},
+            {"label": "No, enforce tenant scope in queries and storage", "explanation": "Trusted identity must constrain the actual rows and objects available to the worker."},
+            {"label": "Yes, if the worker runs inside a container", "explanation": "A container does not remove permissions granted through credentials or mounted data."}
+          ]
+        },
+        "sources": [
+          {"title": "Docker: Engine security", "url": "https://docs.docker.com/engine/security/"},
+          {"title": "Docker: Resource constraints", "url": "https://docs.docker.com/engine/containers/resource_constraints/"},
+          {"title": "OWASP: Authorization Cheat Sheet", "url": "https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html"}
+        ]
+      },
+      "practice": {
+        "kind": "scenario",
+        "title": "Harden a chart-generation worker",
+        "instructions": "A multi-tenant assistant runs generated Python to make charts from private sales data. Choose all controls that restrict execution and data access even when the generated program is wrong or malicious.",
+        "explanation": "Isolation needs independent execution, resource, network, identity, and storage controls. Neither a container label nor a tenant-specific prompt substitutes for enforced limits and authorization.",
+        "options": [
+          {"label": "Use a non-privileged disposable sandbox without host mounts or daemon sockets.", "feedback": "This removes common paths to host files and host-level container control."},
+          {"label": "Enforce CPU, memory, and wall-clock limits; destroy each job workspace.", "feedback": "Explicit limits bound runaway work, and cleanup prevents stale files from reaching later jobs."},
+          {"label": "Deny egress by default and allow only task-required destinations.", "feedback": "Network policy constrains where code can send data independently of model instructions."},
+          {"label": "Use short-lived scoped credentials outside prompts and tenant-enforced queries and storage.", "feedback": "Credentials and data access must reflect trusted tenant identity, not generated claims."},
+          {"label": "Mount the shared export directory read-only and ask code to select its tenant.", "feedback": "Read-only still exposes other tenants' data; selection must be enforced before access."},
+          {"label": "Put a permanent storage administrator key in the prompt for reliable retries.", "feedback": "A long-lived broad key exposes all tenants and can leak through generated output or code."}
+        ],
+        "correct": [0, 1, 2, 3]
+      }
+    }
+  ]
+}
