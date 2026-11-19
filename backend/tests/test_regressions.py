@@ -342,3 +342,95 @@ async def test_outdated_client_is_refused(monkeypatch, params):
     await routes.board_websocket(socket, uuid.uuid4())
     socket.close.assert_awaited_once_with(routes.CLOSE_FORBIDDEN, routes.OUTDATED_CLIENT_REASON)
     verify.assert_not_called()
+
+
+def stored_board(version, doc=None, snapshot=None):
+    return SimpleNamespace(
+        version=version,
+        ydoc_state=doc.get_update() if doc is not None else None,
+        current_snapshot=snapshot or {'nodes': [], 'edges': []},
+    )
+
+
+def node_snapshot(label):
+    return {'nodes': [{'id': 'n', 'type': 'architecture', 'position': {'x': 0, 'y': 0},
+                       'data': {'kind': 'service', 'label': label}}], 'edges': []}
+
+
+def label_of(snapshot, node_id='n'):
+    return next(node['data']['label'] for node in snapshot['nodes'] if node['id'] == node_id)
+
+
+async def strand_unsaved_rename(monkeypatch, base_doc):
+    """A replica renames a node, its last client leaves during a DB outage,
+    and the worker dies before the in-memory retry can save it."""
+    monkeypatch.setattr('app.realtime.state.board_repository.get', AsyncMock(return_value=stored_board(0, base_doc)))
+    registry = BoardStateRegistry()
+    state = await registry.acquire(uuid.uuid4())
+    state.doc.get('nodes', type=Map)['n']['data:label'] = 'stranded'
+    state._dirty = True
+    monkeypatch.setattr('app.realtime.state.board_repository.update_snapshot', AsyncMock(side_effect=OSError('db down')))
+    with pytest.raises(OSError):
+        await registry.release(state.board_id, lambda: 0)
+    registry._retries[state.board_id][1].cancel()  # worker restart
+    return state.board_id
+
+
+def seeded_doc(label):
+    doc = Doc()
+    doc.get('nodes', type=Map)['n'] = Map(node_snapshot(label)['nodes'][0])
+    return doc
+
+
+async def test_stranded_edit_survives_worker_restart(monkeypatch, fake_redis):
+    mock_session(monkeypatch)
+    base = seeded_doc('old')
+    board_id = await strand_unsaved_rename(monkeypatch, base)
+    assert fake_redis.data
+    monkeypatch.setattr('app.realtime.state.board_repository.get', AsyncMock(return_value=stored_board(0, base)))
+    save = AsyncMock(return_value=SimpleNamespace(version=1))
+    monkeypatch.setattr('app.realtime.state.board_repository.update_snapshot', save)
+    restarted = BoardStateRegistry()
+    await restarted.recover_unsaved()
+    save.assert_awaited_once()
+    assert save.call_args.kwargs['board_id'] == board_id
+    assert save.call_args.kwargs['expected_version'] == 0
+    assert label_of(save.call_args.kwargs['snapshot']) == 'stranded'
+    assert not fake_redis.data
+    assert restarted.peek(board_id) is None
+
+
+async def test_stranded_edit_merges_into_newer_live_save(monkeypatch, fake_redis):
+    mock_session(monkeypatch)
+    base = seeded_doc('old')
+    board_id = await strand_unsaved_rename(monkeypatch, base)
+    newer = Doc()
+    newer.apply_update(base.get_update())
+    newer.get('nodes', type=Map)['m'] = Map({**node_snapshot('added elsewhere')['nodes'][0], 'id': 'm'})
+    monkeypatch.setattr('app.realtime.state.board_repository.get', AsyncMock(return_value=stored_board(3, newer)))
+    save = AsyncMock(return_value=SimpleNamespace(version=4))
+    monkeypatch.setattr('app.realtime.state.board_repository.update_snapshot', save)
+    restarted = BoardStateRegistry()
+    state = await restarted.acquire(board_id)
+    state._flush_task.cancel()
+    await state.flush()
+    snapshot = save.call_args.kwargs['snapshot']
+    assert save.call_args.kwargs['expected_version'] == 3
+    assert label_of(snapshot) == 'stranded' and label_of(snapshot, 'm') == 'added elsewhere'
+    assert not fake_redis.data
+
+
+@pytest.mark.parametrize('reseeded', [False, True])
+async def test_stranded_edit_never_overwrites_newer_rest_save(monkeypatch, fake_redis, reseeded):
+    mock_session(monkeypatch)
+    base = seeded_doc('old')
+    await strand_unsaved_rename(monkeypatch, base)
+    rest = node_snapshot('rest')
+    # A REST save replaced the board; maybe a live session has since re-seeded and saved it.
+    newer = stored_board(2, seeded_doc('rest'), rest) if reseeded else stored_board(1, None, rest)
+    monkeypatch.setattr('app.realtime.state.board_repository.get', AsyncMock(return_value=newer))
+    save = AsyncMock(return_value=SimpleNamespace(version=newer.version + 1))
+    monkeypatch.setattr('app.realtime.state.board_repository.update_snapshot', save)
+    await BoardStateRegistry().recover_unsaved()
+    save.assert_not_awaited()
+    assert not fake_redis.data
