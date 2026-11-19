@@ -1,3 +1,7 @@
+import { COURSE_PLAN } from './coursePlan.ts'
+import { checkPractice } from './practice.ts'
+import type { CourseLesson, PracticeAnswer } from './courseTypes.ts'
+
 export const COMPONENTS = {
   user: { name: 'User', category: 'Input', description: 'Sends a goal and receives a response. The application, not the user, owns credentials and permissions.', symbol: '01', x: 30, y: 226 },
   model: { name: 'Language model', category: 'Reasoning', description: 'Predicts the next response or proposes a tool call. It cannot execute tools or remember previous requests by itself.', symbol: 'LM', x: 426, y: 40 },
@@ -112,6 +116,15 @@ export const LESSONS: Lesson[] = [
   },
 ]
 
+const productionLab = LESSONS[LESSONS.length - 1]
+export const GRAPH_LESSONS: Lesson[] = [...LESSONS, {
+  ...productionLab,
+  id: 'capstone', title: 'Design a production agent system', subtitle: 'Bring the whole architecture together', minutes: 12,
+  mission: 'Build a support agent from a blank diagram. Authenticate the request before queueing it. Give the worker a model, authorized knowledge, and scoped memory. Route every sensitive tool action through human approval, and connect the runtime to redacted tracing and evaluations. Do not add a path that bypasses these boundaries.',
+  hint: 'Start with User → Policy gateway → Task queue → Agent runtime. Connect the runtime to Language model, Knowledge store, Session memory, Human approval, and Trace & evals. Human approval is the only path to Tool API. Arrows show calls or dependencies; responses are implicit.',
+  starter: { nodes: ['user'], edges: [] },
+}]
+
 export function connectionId(connection: Connection): string {
   return `${connection.source}:${connection.target}`
 }
@@ -142,15 +155,16 @@ export function starterFor(lesson: Lesson): Architecture {
 }
 
 export const PROGRESS_KEY = 'archboard.agent-learning.v1'
-export type LearningProgress = { version: 1; active: string; graphs: Record<string, Architecture>; completed: string[] }
+export type LearningProgress = { version: 1; active: string; phase: 'lesson' | 'practice'; learned: string[]; activities: Record<string, PracticeAnswer>; graphs: Record<string, Architecture>; completed: string[] }
 
-export function readProgress(raw: string | null): LearningProgress {
-  const empty: LearningProgress = { version: 1, active: LESSONS[0].id, graphs: {}, completed: [] }
+export function readProgress(raw: string | null, course: readonly CourseLesson[] = []): LearningProgress {
+  const planned = COURSE_PLAN.flatMap(module => [...module.lessons])
+  const empty: LearningProgress = { version: 1, active: LESSONS[0].id, phase: 'lesson', learned: [], activities: {}, graphs: {}, completed: [] }
   try {
     const parsed = JSON.parse(raw ?? 'null')
     if (!parsed || parsed.version !== 1) return empty
     const graphs: Record<string, Architecture> = {}
-    for (const lesson of LESSONS) {
+    for (const lesson of GRAPH_LESSONS) {
       const graph = parsed.graphs?.[lesson.id]
       if (!graph || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) continue
       const nodes = [...new Set<ComponentId>(graph.nodes.filter((id: ComponentId) => lesson.nodes.includes(id)))]
@@ -161,11 +175,34 @@ export function readProgress(raw: string | null): LearningProgress {
       }
       graphs[lesson.id] = safe
     }
+    const active = planned.some(l => l.id === parsed.active) ? parsed.active : empty.active
+    const learned = planned.filter(l => Array.isArray(parsed.learned) && parsed.learned.includes(l.id)).map(l => l.id)
+    const activities: Record<string, PracticeAnswer> = {}
+    for (const lesson of course) {
+      const saved = parsed.activities?.[lesson.id]
+      const practice = lesson.practice
+      if (!saved || typeof saved !== 'object') continue
+      if (practice.kind === 'scenario' && Array.isArray(saved.choices)) activities[lesson.id] = { choices: [...new Set<number>(saved.choices.filter((choice: unknown) => Number.isInteger(choice) && Number(choice) >= 0 && Number(choice) < practice.options.length))] }
+      if (practice.kind === 'sequence' && Array.isArray(saved.order)) {
+        const order = [...new Set<string>(saved.order.filter((id: unknown) => practice.items.some(item => item.id === id)))]
+        activities[lesson.id] = { order: [...order, ...practice.items.map(item => item.id).filter(id => !order.includes(id))] }
+      }
+      if (practice.kind === 'budget' && saved.values && typeof saved.values === 'object') activities[lesson.id] = { values: Object.fromEntries(practice.fields.filter(field => typeof saved.values[field.id] === 'number' && Number.isFinite(saved.values[field.id])).map(field => [field.id, saved.values[field.id]])) }
+    }
     return {
       version: 1,
-      active: LESSONS.some(l => l.id === parsed.active) ? parsed.active : empty.active,
+      active,
+      phase: parsed.phase === 'practice' && learned.includes(active) ? 'practice' : 'lesson',
+      learned,
+      activities,
       graphs,
-      completed: LESSONS.filter(l => Array.isArray(parsed.completed) && parsed.completed.includes(l.id) && graphs[l.id] && checkArchitecture(l, graphs[l.id]).every(c => c.passed)).map(l => l.id),
+      completed: planned.filter(l => {
+        if (!Array.isArray(parsed.completed) || !parsed.completed.includes(l.id)) return false
+        const lab = GRAPH_LESSONS.find(candidate => candidate.id === l.id)
+        if (lab) return !!graphs[l.id] && checkArchitecture(lab, graphs[l.id]).every(check => check.passed)
+        const lesson = course.find(candidate => candidate.id === l.id)
+        return !!lesson && checkPractice(lesson.practice, activities[l.id]).every(check => check.passed) && checkPractice(lesson.practice, parsed.activities?.[l.id]).every(check => check.passed)
+      }).map(l => l.id),
     }
   } catch {
     return empty

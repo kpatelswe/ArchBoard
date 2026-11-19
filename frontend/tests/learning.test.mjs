@@ -93,7 +93,7 @@ test('missing, corrupt, and unknown-version progress safely defaults', () => {
 
 test('valid progress survives a round trip for every lesson', () => {
   const saved = { version: 1, active: LESSONS[5].id, graphs: Object.fromEntries(LESSONS.map(l => [l.id, solutionFor(l)])), completed: LESSONS.map(l => l.id) }
-  assert.deepEqual(readProgress(JSON.stringify(saved)), saved)
+  assert.deepEqual(readProgress(JSON.stringify(saved)), { ...saved, phase: 'lesson', learned: [], activities: {} })
 })
 
 test('saved graphs remove unknown components, dangling edges, duplicates, and self-loops', () => {

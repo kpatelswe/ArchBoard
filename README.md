@@ -63,16 +63,26 @@ cd frontend && npm install && npm run dev    # http://localhost:5173
 
 Open the same board in two browser profiles to see the realtime layer work.
 
-## Agent architecture learning lab
+## Agent architecture course
 
-Open `/learn` for a public, self-contained zero-to-one learning path. Six
-hands-on lessons cover model calls, agent/tool loops, retrieval, session
-memory, policy and human approval, and queues with observability. Add and
-connect components, check each architecture, then step through a clearly
-labeled simulated request. No model API, backend, or Clerk key is needed
-for this route. Progress stays in this browser’s local storage.
+Open `/learn` for a public, self-contained beginner-to-advanced course with
+32 lessons in eight modules: foundations, tools and integrations, orchestration,
+knowledge and memory, multi-agent systems, safety and security, production
+systems, and evaluation with a capstone.
 
-To run only the lab locally, use Node.js 22.18+ (24 LTS recommended):
+Each lesson teaches a concept with a worked example and source references.
+An understanding check unlocks a separate practice exercise: architecture
+building with simulated traces, scenario decisions, ordered workflows, or
+simplified budget calculations. The final capstone builds the complete support
+agent architecture from a blank diagram. These deterministic exercises teach
+design tradeoffs; they do not certify a real service as production-ready.
+
+No model API, backend, or Clerk key is needed for this route. Reading progress,
+practice answers, and diagrams stay in this browser’s local storage. Existing
+six-lab progress is preserved. The course is lazy-loaded separately from the
+authenticated whiteboard.
+
+To run only the course locally, use Node.js 22.18+ (24 LTS recommended):
 
 ```bash
 cd frontend
@@ -80,6 +90,14 @@ npm ci
 npm run dev
 # Open http://localhost:5173/learn
 npm test
+npm run validate:course
 npm run lint
 npm run build
 ```
+
+Course metadata and learning goals live in `frontend/src/learn/coursePlan.ts`;
+lesson and exercise types are in `courseTypes.ts`. Module JSON files under
+`frontend/src/learn/content` follow the complete `example-lesson.json` reference.
+Validate a single module with `npm run validate:course -- src/learn/content/<module-id>.json`
+from `frontend`. The capstone is a separate lesson file, not part of the evaluation
+module’s three-lesson authoring file.
