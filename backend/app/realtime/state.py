@@ -15,6 +15,7 @@ the one concurrency problem CRDTs genuinely erase.
 
 import asyncio
 import contextlib
+import hashlib
 import logging
 import uuid
 from collections.abc import Callable
@@ -32,17 +33,37 @@ MAX_RETRY_SECONDS = 60.0
 logger = logging.getLogger(__name__)
 
 
+
+def _seed(board_id: uuid.UUID, version: int, snapshot: dict) -> bytes:
+    """The doc seeded from a saved JSON snapshot, as an update.
+
+    It is written under a client id derived from the board and version, so
+    every worker seeding the same snapshot produces the same CRDT items: their
+    later edits and deletions apply to shared history instead of racing
+    independent copies, while a re-seed after a REST save starts a new one.
+    """
+    digest = hashlib.sha256(f"{board_id}:{version}".encode()).digest()
+    doc = Doc(client_id=int.from_bytes(digest[:4], "big"))
+    nodes = doc.get("nodes", type=Map)
+    edges = doc.get("edges", type=Map)
+    parsed = BoardSnapshot.model_validate(snapshot)
+    for node in parsed.nodes:
+        nodes[node.id] = Map(node.model_dump(mode="json", exclude_none=True))
+    for edge in parsed.edges:
+        edges[edge.id] = Map(edge.model_dump(mode="json", exclude_none=True))
+    return doc.get_update()
+
+
 class BoardState:
     def __init__(
-        self, board_id: uuid.UUID, doc: Doc, version: int, *, base_state: bytes | None = None
+        self, board_id: uuid.UUID, doc: Doc, version: int
     ) -> None:
         self.board_id = board_id
         self.doc = doc
         self.version = version
         # State vector of the doc as stored at `version`: what a newer stored
         # doc must contain for this replica's edits to merge into it safely.
-        self._base_state = doc.get_state() if base_state is None else base_state
-        self._base_lineage = unsaved.lineage(doc)
+        self._base_state = doc.get_state()
         self._dirty = False
         self._superseded = False
         self._flush_task: asyncio.Task | None = None
@@ -74,26 +95,12 @@ class BoardState:
         ]
 
         doc = Doc()
-        nodes = doc.get("nodes", type=Map)
-        edges = doc.get("edges", type=Map)
-        base_state = None
-        if board.ydoc_state:
-            doc.apply_update(board.ydoc_state)
-        elif recovered:
-            # The stashed replica was seeded from this very snapshot. Seeding
-            # again would race its edits key by key, so continue its doc.
-            doc.apply_update(recovered[0].update)
-            base_state = recovered[0].base_state
-        else:
-            # No CRDT history yet (fresh board, or a REST save cleared it):
-            # seed the doc from the JSON snapshot.
-            snapshot = BoardSnapshot.model_validate(board.current_snapshot)
-            for node in snapshot.nodes:
-                nodes[node.id] = Map(node.model_dump(mode="json", exclude_none=True))
-            for edge in snapshot.edges:
-                edges[edge.id] = Map(edge.model_dump(mode="json", exclude_none=True))
-            unsaved.mark_lineage(doc, board.version)
-        state = cls(board_id, doc, board.version, base_state=base_state)
+        doc.get("nodes", type=Map)
+        doc.get("edges", type=Map)
+        # No CRDT history yet (fresh board, or a REST save cleared it): seed
+        # the doc from the JSON snapshot.
+        doc.apply_update(board.ydoc_state or _seed(board_id, board.version, board.current_snapshot))
+        state = cls(board_id, doc, board.version)
         for edit in recovered:
             doc.apply_update(edit.update)
             state._journal_keys.add(edit.key)
@@ -185,7 +192,6 @@ class BoardState:
                 key,
                 base_version=self.version,
                 base_state=self._base_state,
-                base_lineage=self._base_lineage,
                 update=self.encoded_state(),
             )
         except Exception:
@@ -208,7 +214,7 @@ class BoardState:
 
     async def _persist(self, *, yield_to_rest: bool = False) -> None:
         async with SessionLocal() as session:
-            state_vector, lineage = self.doc.get_state(), unsaved.lineage(self.doc)
+            state_vector = self.doc.get_state()
             saved = await board_repository.update_snapshot(
                 session,
                 board_id=self.board_id,
@@ -218,7 +224,7 @@ class BoardState:
             )
             if saved is not None:
                 self.version = saved.version
-                self._base_state, self._base_lineage = state_vector, lineage
+                self._base_state = state_vector
                 return
             # Another writer bumped the version (a REST save, or another
             # process's flush). Merge their document into ours — CRDT merge
@@ -227,9 +233,7 @@ class BoardState:
             board = await board_repository.get(session, self.board_id)
             if board is None:
                 return
-            if yield_to_rest and not unsaved.descends(
-                board.ydoc_state, self._base_state, self._base_lineage
-            ):
+            if yield_to_rest and not unsaved.descends(board.ydoc_state, self._base_state):
                 # A REST save replaced the board (and cleared its CRDT
                 # history) after this doc was loaded, possibly re-seeded by a
                 # session since. With nobody connected, that newer explicit
@@ -239,7 +243,7 @@ class BoardState:
                 return
             if board.ydoc_state:
                 self.doc.apply_update(board.ydoc_state)
-            state_vector, lineage = self.doc.get_state(), unsaved.lineage(self.doc)
+            state_vector = self.doc.get_state()
             saved = await board_repository.update_snapshot(
                 session,
                 board_id=self.board_id,
@@ -249,7 +253,7 @@ class BoardState:
             )
             if saved is not None:
                 self.version = saved.version
-                self._base_state, self._base_lineage = state_vector, lineage
+                self._base_state = state_vector
             else:
                 self._dirty = True  # lost twice; the next update retries
 

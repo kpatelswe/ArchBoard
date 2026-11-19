@@ -442,6 +442,7 @@ async def test_independent_seeds_merge_stranded_edit(monkeypatch, fake_redis):
     board_id = uuid.uuid4()
     monkeypatch.setattr('app.realtime.state.board_repository.get',
                         AsyncMock(return_value=stored_board(0, None, node_snapshot('old'))))
+    other = await BoardState.load(board_id)  # seeded on another worker, independently
     stranded = BoardStateRegistry()
     state = await stranded.acquire(board_id)
     state.doc.get('nodes', type=Map)['a'] = Map({**node_snapshot('stranded')['nodes'][0], 'id': 'a'})
@@ -451,8 +452,8 @@ async def test_independent_seeds_merge_stranded_edit(monkeypatch, fake_redis):
         await stranded.release(board_id, lambda: 0)
     stranded._retries[board_id][1].cancel()  # worker restart
 
-    other = await BoardState.load(board_id)
     other.doc.get('nodes', type=Map)['b'] = Map({**node_snapshot('saved elsewhere')['nodes'][0], 'id': 'b'})
+    del other.doc.get('nodes', type=Map)['n']
     monkeypatch.setattr('app.realtime.state.board_repository.get',
                         AsyncMock(return_value=stored_board(1, other.doc, node_snapshot('old'))))
     save = AsyncMock(return_value=SimpleNamespace(version=2))
@@ -462,6 +463,7 @@ async def test_independent_seeds_merge_stranded_edit(monkeypatch, fake_redis):
     snapshot = save.call_args.kwargs['snapshot']
     assert save.call_args.kwargs['expected_version'] == 1
     assert label_of(snapshot, 'a') == 'stranded' and label_of(snapshot, 'b') == 'saved elsewhere'
+    assert 'n' not in {node['id'] for node in snapshot['nodes']}  # the saved deletion stands
     assert not fake_redis.data
 
 
@@ -470,7 +472,7 @@ async def test_stale_board_read_keeps_newer_journal_entry(monkeypatch, fake_redi
     board_id = uuid.uuid4()
     base = seeded_doc('old')
     await unsaved.stash(unsaved.key_for(board_id, 'x'), base_version=5, base_state=base.get_state(),
-                        base_lineage=None, update=base.get_update())
+                        update=base.get_update())
     monkeypatch.setattr('app.realtime.state.board_repository.get', AsyncMock(return_value=stored_board(4, None)))
     state = await BoardState.load(board_id)
     assert not state._dirty
