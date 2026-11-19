@@ -15,6 +15,7 @@ the one concurrency problem CRDTs genuinely erase.
 
 import asyncio
 import contextlib
+import hashlib
 import logging
 import uuid
 from collections.abc import Callable
@@ -23,6 +24,7 @@ from pycrdt import Doc, Map
 from pydantic import ValidationError
 
 from app.core.db import SessionLocal
+from app.realtime import unsaved
 from app.repositories import board_repository
 from app.schemas.snapshot import BoardSnapshot
 
@@ -31,36 +33,86 @@ MAX_RETRY_SECONDS = 60.0
 logger = logging.getLogger(__name__)
 
 
+
+def _seed(board_id: uuid.UUID, version: int, snapshot: dict) -> bytes:
+    """The doc seeded from a saved JSON snapshot, as an update.
+
+    It is written under a client id derived from the board and version, so
+    every worker seeding the same snapshot produces the same CRDT items: their
+    later edits and deletions apply to shared history instead of racing
+    independent copies, while a re-seed after a REST save starts a new one.
+    """
+    digest = hashlib.sha256(f"{board_id}:{version}".encode()).digest()
+    doc = Doc(client_id=int.from_bytes(digest[:4], "big"))
+    # Always write something, so even an empty board's seed has a clock that
+    # later docs must contain to descend from it.
+    doc.get("seed", type=Map)["version"] = version
+    nodes = doc.get("nodes", type=Map)
+    edges = doc.get("edges", type=Map)
+    parsed = BoardSnapshot.model_validate(snapshot)
+    for node in parsed.nodes:
+        nodes[node.id] = Map(node.model_dump(mode="json", exclude_none=True))
+    for edge in parsed.edges:
+        edges[edge.id] = Map(edge.model_dump(mode="json", exclude_none=True))
+    return doc.get_update()
+
+
 class BoardState:
-    def __init__(self, board_id: uuid.UUID, doc: Doc, version: int) -> None:
+    def __init__(
+        self, board_id: uuid.UUID, doc: Doc, version: int
+    ) -> None:
         self.board_id = board_id
         self.doc = doc
         self.version = version
+        # State vector of the doc as stored at `version`: what a newer stored
+        # doc must contain for this replica's edits to merge into it safely.
+        self._base_state = doc.get_state()
         self._dirty = False
         self._superseded = False
         self._flush_task: asyncio.Task | None = None
+        # Journal entries (this replica's stashes, or ones it recovered) that
+        # are cleared only once their edits are saved. Every stash gets a new
+        # key, so deleting a key never deletes edits stashed after it was read.
+        self._journal_keys: set[str] = set()
 
     @classmethod
     async def load(cls, board_id: uuid.UUID) -> "BoardState":
+        # Journal first: every entry's base was saved before it was stashed,
+        # so the board read after it is never older than an entry's base.
+        try:
+            edits = await unsaved.entries(board_id)
+        except Exception:
+            logger.exception("could not read unsaved edits: %s", board_id)
+            edits = []
         async with SessionLocal() as session:
             board = await board_repository.get(session, board_id)
         if board is None:
             raise LookupError("board vanished")
+        recovered = [
+            edit for edit in edits
+            if unsaved.mergeable(edit, version=board.version, ydoc_state=board.ydoc_state)
+        ]
+        superseded = [
+            edit.key for edit in edits
+            if edit not in recovered and edit.base_version <= board.version
+        ]
 
         doc = Doc()
-        nodes = doc.get("nodes", type=Map)
-        edges = doc.get("edges", type=Map)
-        if board.ydoc_state:
-            doc.apply_update(board.ydoc_state)
-        else:
-            # No CRDT history yet (fresh board, or a REST save cleared it):
-            # seed the doc from the JSON snapshot.
-            snapshot = BoardSnapshot.model_validate(board.current_snapshot)
-            for node in snapshot.nodes:
-                nodes[node.id] = Map(node.model_dump(mode="json", exclude_none=True))
-            for edge in snapshot.edges:
-                edges[edge.id] = Map(edge.model_dump(mode="json", exclude_none=True))
-        return cls(board_id, doc, board.version)
+        doc.get("nodes", type=Map)
+        doc.get("edges", type=Map)
+        # No CRDT history yet (fresh board, or a REST save cleared it): seed
+        # the doc from the JSON snapshot.
+        doc.apply_update(board.ydoc_state or _seed(board_id, board.version, board.current_snapshot))
+        state = cls(board_id, doc, board.version)
+        for edit in recovered:
+            doc.apply_update(edit.update)
+            state._journal_keys.add(edit.key)
+            state._dirty = True
+        if superseded:
+            logger.warning("dropping unsaved edits superseded by a newer save: %s", board_id)
+            with contextlib.suppress(Exception):
+                await unsaved.discard(*superseded)
+        return state
 
     def encoded_state(self) -> bytes:
         """The full document as one update — what joiners and flushes use."""
@@ -132,9 +184,40 @@ class BoardState:
         except BaseException:
             self._dirty = True
             raise
+        if not self._dirty:
+            await self._clear_journal()
+
+    async def stash_unsaved(self) -> None:
+        """Journal the unsaved doc in Redis so a worker restart cannot lose it."""
+        key = unsaved.key_for(self.board_id, uuid.uuid4().hex)
+        try:
+            await unsaved.stash(
+                key,
+                base_version=self.version,
+                base_state=self._base_state,
+                update=self.encoded_state(),
+            )
+        except Exception:
+            logger.exception("could not stash unsaved board: %s", self.board_id)
+            return
+        self._journal_keys.add(key)
+
+    async def _clear_journal(self) -> None:
+        if not self._journal_keys:
+            return
+        keys = set(self._journal_keys)
+        try:
+            await unsaved.discard(*keys)
+        except Exception:
+            # A leftover entry is harmless: its edits are now in the stored
+            # doc, so merging it again later changes nothing.
+            logger.exception("could not clear unsaved edits: %s", self.board_id)
+            return
+        self._journal_keys -= keys
 
     async def _persist(self, *, yield_to_rest: bool = False) -> None:
         async with SessionLocal() as session:
+            state_vector = self.doc.get_state()
             saved = await board_repository.update_snapshot(
                 session,
                 board_id=self.board_id,
@@ -144,6 +227,7 @@ class BoardState:
             )
             if saved is not None:
                 self.version = saved.version
+                self._base_state = state_vector
                 return
             # Another writer bumped the version (a REST save, or another
             # process's flush). Merge their document into ours — CRDT merge
@@ -152,16 +236,17 @@ class BoardState:
             board = await board_repository.get(session, self.board_id)
             if board is None:
                 return
-            if yield_to_rest and not board.ydoc_state:
+            if yield_to_rest and not unsaved.descends(board.ydoc_state, self._base_state):
                 # A REST save replaced the board (and cleared its CRDT
-                # history) after this doc was loaded. With nobody connected,
-                # that newer explicit save wins; the next session re-seeds
-                # from it instead of this stale replica overwriting it.
+                # history) after this doc was loaded, possibly re-seeded by a
+                # session since. With nobody connected, that newer explicit
+                # save wins instead of this stale replica overwriting it.
                 self.version = board.version
                 self._superseded = True
                 return
             if board.ydoc_state:
                 self.doc.apply_update(board.ydoc_state)
+            state_vector = self.doc.get_state()
             saved = await board_repository.update_snapshot(
                 session,
                 board_id=self.board_id,
@@ -171,6 +256,7 @@ class BoardState:
             )
             if saved is not None:
                 self.version = saved.version
+                self._base_state = state_vector
             else:
                 self._dirty = True  # lost twice; the next update retries
 
@@ -193,6 +279,8 @@ class BoardStateRegistry:
             if state is None:
                 state = await BoardState.load(board_id)
                 self._states[board_id] = state
+                if state._dirty:
+                    state.schedule_flush()  # save recovered edits promptly
             return state
 
     def peek(self, board_id: uuid.UUID) -> BoardState | None:
@@ -214,6 +302,8 @@ class BoardStateRegistry:
             try:
                 await state.flush()  # last one out turns off the lights, durably
             finally:
+                if state._dirty and self._states.get(board_id) is state and remaining_connections() == 0:
+                    await state.stash_unsaved()
                 self._settle(board_id, state, remaining_connections)
 
     def _settle(
@@ -278,5 +368,32 @@ class BoardStateRegistry:
                     self._states.pop(board_id, None)
                     return
             delay = min(delay * 2, MAX_RETRY_SECONDS)
+
+    async def recover_unsaved(self) -> None:
+        """Save edits stashed by replicas that no longer exist (a restarted worker)."""
+        for board_id in await unsaved.boards():
+            async with self._load_lock:
+                if board_id in self._states:
+                    continue  # the replica here saves its edits, or recovers them on reload
+                try:
+                    state = await BoardState.load(board_id)
+                except LookupError:
+                    await unsaved.discard(*[edit.key for edit in await unsaved.entries(board_id)])
+                    continue
+                except Exception:
+                    logger.exception("could not load board to recover unsaved edits: %s", board_id)
+                    continue
+                try:
+                    await state.flush(yield_to_rest=True)
+                except Exception:
+                    logger.exception("unsaved board recovery failed: %s", board_id)
+
+    async def recover_unsaved_forever(self) -> None:
+        while True:
+            try:
+                await self.recover_unsaved()
+            except Exception:
+                logger.exception("unsaved board sweep failed")
+            await asyncio.sleep(MAX_RETRY_SECONDS)
 
 registry = BoardStateRegistry()

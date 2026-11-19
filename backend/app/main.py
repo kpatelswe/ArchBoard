@@ -1,3 +1,7 @@
+import asyncio
+import contextlib
+from contextlib import asynccontextmanager
+
 import websockets.http11
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -5,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api import boards, health, invites, users
 from app.websocket import routes as websocket_routes
 from app.core.config import get_settings
+from app.realtime.state import registry
 
 # Dev-only: the websockets library caps each WS-handshake header line at 8KB.
 # On localhost, browsers send the whole cookie jar with the upgrade (cookies
@@ -19,9 +24,22 @@ if get_settings().app_env != "production":
     )
 
 
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # Board edits whose final save failed are journaled in Redis; this
+    # saves the ones a previous worker left behind.
+    sweep = asyncio.create_task(registry.recover_unsaved_forever())
+    try:
+        yield
+    finally:
+        sweep.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await sweep
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
-    app = FastAPI(title="ArchBoard API")
+    app = FastAPI(title="ArchBoard API", lifespan=lifespan)
 
     app.add_middleware(
         CORSMiddleware,
