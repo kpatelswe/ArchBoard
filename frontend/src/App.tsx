@@ -92,9 +92,12 @@ function App() {
         <Link to="/" className="nav__brand">
           <Wordmark />
         </Link>
-        <Show when="signed-in">
-          <UserButton />
-        </Show>
+        <div className="learning-nav-actions">
+          <Link to="/learn" className="btn">Learn agent design →</Link>
+          <Show when="signed-in">
+            <UserButton />
+          </Show>
+        </div>
       </header>
 
       <Show when="signed-out">

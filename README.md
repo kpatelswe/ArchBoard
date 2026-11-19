@@ -62,3 +62,24 @@ cd frontend && npm install && npm run dev    # http://localhost:5173
 ```
 
 Open the same board in two browser profiles to see the realtime layer work.
+
+## Agent architecture learning lab
+
+Open `/learn` for a public, self-contained zero-to-one learning path. Six
+hands-on lessons cover model calls, agent/tool loops, retrieval, session
+memory, policy and human approval, and queues with observability. Add and
+connect components, check each architecture, then step through a clearly
+labeled simulated request. No model API, backend, or Clerk key is needed
+for this route. Progress stays in this browser’s local storage.
+
+To run only the lab locally, use Node.js 22.18+ (24 LTS recommended):
+
+```bash
+cd frontend
+npm ci
+npm run dev
+# Open http://localhost:5173/learn
+npm test
+npm run lint
+npm run build
+```
