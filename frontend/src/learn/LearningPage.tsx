@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowLeft, ArrowRight, BookOpen, Check, CheckCircle2, ChevronRight, Lightbulb, Link2, MousePointer2, Play, Plus, RotateCcw, Terminal, X } from 'lucide-react'
 import { COMPONENTS, LESSONS, PROGRESS_KEY, checkArchitecture, connect, connectionId, readProgress, removeComponent, starterFor, type Architecture, type ComponentId } from './curriculum'
@@ -14,6 +14,7 @@ function componentPosition(id: ComponentId, firstLesson: boolean) {
 }
 
 export function LearningPage() {
+  const headingRef = useRef<HTMLHeadingElement>(null)
   const [progress, setProgress] = useState(loadProgress)
   const [source, setSource] = useState<ComponentId | null>(null)
   const [inspected, setInspected] = useState<ComponentId>('user')
@@ -54,6 +55,8 @@ export function LearningPage() {
     setTraceIndex(null)
     setResetting(false)
     setAnnouncement(`Lesson ${index + 1}: ${LESSONS[index].title}`)
+    window.scrollTo({ top: 0, behavior: 'instant' })
+    headingRef.current?.focus({ preventScroll: true })
   }
 
   function chooseNode(id: ComponentId) {
@@ -122,7 +125,7 @@ export function LearningPage() {
         <main className="learning__main">
           <div className="learning__breadcrumb">Agent architecture <ChevronRight size={12} /> <span>Lesson {String(lessonIndex + 1).padStart(2, '0')}</span></div>
           <div className="learning__heading">
-            <div><div className="learning__eyebrow">{lesson.subtitle}</div><h2>{lesson.title}</h2></div>
+            <div><div className="learning__eyebrow">{lesson.subtitle}</div><h2 ref={headingRef} tabIndex={-1}>{lesson.title}</h2></div>
             <span className="learning__badge">{completed ? <CheckCircle2 size={14} /> : <BookOpen size={14} />}{completed ? 'Lesson complete' : `${lesson.minutes} MIN · HANDS-ON`}</span>
           </div>
           <p className="learning__concept">{lesson.concept}</p>
