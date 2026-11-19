@@ -39,6 +39,7 @@ export function LearningPage() {
   }, [progress])
 
   function updateGraph(next: Architecture) {
+    if (next === graph) return
     setProgress(current => ({ ...current, graphs: { ...current.graphs, [lesson.id]: next }, completed: current.completed.filter(id => id !== lesson.id) }))
     setChecked(false)
     setTraceIndex(null)
@@ -63,8 +64,9 @@ export function LearningPage() {
       return
     }
     if (source !== id) {
-      updateGraph(connect(graph, source, id))
-      setAnnouncement(`Connected ${COMPONENTS[source].name} to ${COMPONENTS[id].name}.`)
+      const next = connect(graph, source, id)
+      updateGraph(next)
+      setAnnouncement(next === graph ? 'That connection already exists.' : `Connected ${COMPONENTS[source].name} to ${COMPONENTS[id].name}.`)
     }
     setSource(null)
   }
