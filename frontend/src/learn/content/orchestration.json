@@ -1,0 +1,256 @@
+{
+  "id": "orchestration",
+  "title": "Orchestration",
+  "lessons": [
+    {
+      "id": "routing",
+      "title": "Route work to the right path",
+      "notes": {
+        "topic": "Explicit routing decisions",
+        "minutes": 4,
+        "lead": "A support inbox contains different jobs: explain a feature, investigate a failed login, or request a refund. Routing chooses a suitable process before solving the request. Separate paths can use different prompts and tools without giving every request every capability.",
+        "sections": [
+          {
+            "heading": "Define the dispatch contract",
+            "paragraphs": [
+              "Start with a small, named set of destinations and written criteria. For example, general product questions go to documentation, login failures go to technical support, and refund requests go to billing review. Use deterministic rules for trustworthy structured fields; use a classifier when the distinction depends on natural language.",
+              "Require the classifier to return an allowed route label, then validate that label in application code. A classification is a proposal, not permission to execute a refund. Each destination still enforces its own resource authorization and action checks. Record the selected route and reason so misroutes can be investigated."
+            ]
+          },
+          {
+            "heading": "Make uncertainty a real path",
+            "paragraphs": [
+              "Define what happens when the message is empty, matches several categories, or produces an invalid label. A clarification question is often cheaper and safer than guessing. If one clarification still leaves a sensitive request ambiguous, escalate to a human with the original request and the unresolved distinction.",
+              "Fallback must be explicit rather than silently choosing the most powerful handler. A documentation-only fallback may answer general questions, but it must not claim to resolve a billing incident. Evaluate routing with representative examples, including mixed requests and unknown categories; a model's stated confidence alone is not proof of correct classification."
+            ]
+          }
+        ],
+        "flow": ["Receive request", "Apply routing criteria", "Validate destination", "Dispatch or clarify", "Escalate unresolved cases"],
+        "example": {
+          "title": "A mixed billing and login request",
+          "steps": [
+            {"label": "Input", "detail": "A customer writes, 'I cannot sign in, and I want my money back.' Both technical support and billing criteria match."},
+            {"label": "Clarify", "detail": "The router asks which problem to address first instead of assuming the login problem authorizes a refund."},
+            {"label": "Dispatch", "detail": "The customer chooses billing. The application validates the billing label and sends the request to billing review, where identity and order access are checked separately."}
+          ]
+        },
+        "question": {
+          "prompt": "A classifier returns a destination outside the allowed route labels. What should the runtime do?",
+          "answer": 1,
+          "options": [
+            {"label": "Run the most capable handler", "explanation": "Extra capability does not resolve invalid classification and can expose unnecessary actions."},
+            {"label": "Use the defined clarification or escalation fallback", "explanation": "Reject the invalid label and follow an explicit uncertainty path rather than inventing a destination."},
+            {"label": "Trust the label because it came from the model", "explanation": "Model output can violate the route contract; dispatch must validate it outside the model."}
+          ]
+        },
+        "sources": [
+          {"title": "Anthropic: Building effective agents — routing", "url": "https://www.anthropic.com/engineering/building-effective-agents"},
+          {"title": "LangGraph: Workflows and agents — routing", "url": "https://docs.langchain.com/oss/python/langgraph/workflows-agents"}
+        ]
+      },
+      "practice": {
+        "kind": "scenario",
+        "title": "Design the support inbox router",
+        "instructions": "Select every appropriate decision. Your inbox accepts documentation, technical-support, and billing requests. Some messages are empty or mixed, and the classifier can return invalid labels. Billing actions require separate authorization.",
+        "explanation": "A useful router has explicit destinations, validation, and a bounded uncertainty path. Classification chooses a process; it does not authorize the process's sensitive actions. Empty and ambiguous inputs need a fallback, not arbitrary dispatch.",
+        "options": [
+          {"label": "Validate the route against a fixed set before dispatch.", "feedback": "Correct: an unexpected model label must not become an arbitrary executable destination."},
+          {"label": "Ask a clarification for empty or mixed requests; escalate if unresolved.", "feedback": "Correct: this gives missing information and ambiguity an explicit, bounded recovery path."},
+          {"label": "Let the billing label itself authorize a refund.", "feedback": "Incorrect: a category prediction is not an identity check or permission to move money."},
+          {"label": "Send all unknown labels to the handler with the broadest tools.", "feedback": "Incorrect: uncertainty should not increase privileges or bypass the defined fallback."},
+          {"label": "Route clear product questions to the documentation path.", "feedback": "Correct: the explicit rule matches the request to a specialized, limited-capability process."}
+        ],
+        "correct": [0, 1, 4]
+      }
+    },
+    {
+      "id": "workflow-dags",
+      "title": "Compose workflows & DAGs",
+      "notes": {
+        "topic": "Dependencies before concurrency",
+        "minutes": 4,
+        "lead": "A workflow makes task dependencies explicit. A directed acyclic graph, or DAG, represents tasks as nodes and required precedence as edges. It has no dependency cycles. This lets a scheduler identify which tasks can run now without guessing from a written checklist.",
+        "sections": [
+          {
+            "heading": "Edges describe required inputs",
+            "paragraphs": [
+              "Draw an edge from A to B when B needs A's validated output. For a release brief, first validate the release identifier, then retrieve its changelog and test report. Drafting depends on both retrieval results. Publishing depends on reviewing the draft. A task is ready only when all required predecessors have completed successfully.",
+              "Validate intermediate outputs, not just task completion flags. A retrieval request that returned an empty document is not automatically usable evidence. Define a failure policy at each join: stop, request missing evidence, or explicitly produce a partial answer. Do not silently synthesize a complete release assessment from missing test results."
+            ]
+          },
+          {
+            "heading": "Parallelize independent work safely",
+            "paragraphs": [
+              "After identifier validation, changelog retrieval and test-report retrieval can run together because neither needs the other's result. Give each branch its own output slot and merge only after both finish. Parallel execution reduces waiting on independent operations; it does not remove dependencies or make shared writes safe.",
+              "Two branches that overwrite the same draft are not safely independent. Assign separate artifacts, serialize mutations, or use a deliberate merge rule. Bound concurrency to protect downstream services. A topological order is any ordering that respects every edge, so independent branches may appear in either order. If a teaching exercise needs one exact sequence, represent their concurrent launch as one stage."
+            ]
+          }
+        ],
+        "flow": ["Validate release ID", "Fetch changelog and tests concurrently", "Join validated evidence", "Draft release brief", "Review before publishing"],
+        "example": {
+          "title": "Build a release brief from two reports",
+          "steps": [
+            {"label": "Fan out", "detail": "Release R7 is validated. Start two read-only lookups: a two-second changelog fetch and a five-second test-report fetch."},
+            {"label": "Join", "detail": "The retrieval stage takes about five seconds rather than seven, ignoring overhead. Drafting waits for both results and checks that both refer to R7."},
+            {"label": "Handle failure", "detail": "If the test report is missing, stop the complete-brief path and request it. Never publish a claim that tests passed merely because the changelog arrived."}
+          ]
+        },
+        "question": {
+          "prompt": "The changelog is ready but the required test report is still loading. May the complete-brief drafting stage start?",
+          "answer": 0,
+          "options": [
+            {"label": "No, its required join is not ready", "explanation": "Drafting needs both validated inputs, so completion of one branch does not satisfy the dependency."},
+            {"label": "Yes, parallelism removes the dependency", "explanation": "Parallel branches still have a join; concurrency changes scheduling, not required evidence."},
+            {"label": "Yes, replace the missing report with a guess", "explanation": "Inventing evidence hides a failed prerequisite instead of following the defined failure policy."}
+          ]
+        },
+        "sources": [
+          {"title": "LangGraph: Workflows and agents — chaining and parallelization", "url": "https://docs.langchain.com/oss/python/langgraph/workflows-agents"},
+          {"title": "Anthropic: Building effective agents — parallelization", "url": "https://www.anthropic.com/engineering/building-effective-agents"}
+        ]
+      },
+      "practice": {
+        "kind": "sequence",
+        "title": "Schedule the release-brief DAG",
+        "instructions": "Order these stages for the successful release-brief path. Both retrieval branches are read-only and independent after ID validation; their concurrent launch is one stage. The draft requires both validated results, and review must precede publication.",
+        "explanation": "Validate before fan-out, join all required evidence before drafting, and review the resulting draft before publication. The two fetches share a stage because neither has a dependency on the other. Missing evidence would stop this successful path.",
+        "items": [
+          {"id": "draft", "label": "Draft the brief from the joined release evidence."},
+          {"id": "validate", "label": "Validate the requested release identifier and access."},
+          {"id": "publish", "label": "Publish only the reviewed release brief."},
+          {"id": "fetch", "label": "Launch changelog and test-report retrieval concurrently."},
+          {"id": "review", "label": "Review the completed draft against the evidence."},
+          {"id": "join", "label": "Wait for both results and validate their release IDs and contents."}
+        ],
+        "correctOrder": ["validate", "fetch", "join", "draft", "review", "publish"]
+      }
+    },
+    {
+      "id": "planning",
+      "title": "Plan, execute & replan",
+      "notes": {
+        "topic": "Plans are revisable hypotheses",
+        "minutes": 4,
+        "lead": "A plan describes intended work; it is not evidence that work happened. In an uncertain task, separate a planner that proposes steps from an executor that checks and performs them. Feed real observations back into planning instead of treating the initial checklist as a prophecy.",
+        "sections": [
+          {
+            "heading": "Make the plan executable and bounded",
+            "paragraphs": [
+              "State the objective, acceptance criteria, dependencies, and allowed tools before planning. Each proposed step should name an observable result, such as an incident time range or a matching log record. The runtime checks tool arguments and permissions before execution; writing a step into a plan grants no new authority.",
+              "Keep the next steps small enough to inspect. Store status separately as proposed, running, succeeded, or blocked, together with evidence references. Reserve a maximum number of execution attempts and plan revisions. A missing objective or essential identifier calls for clarification, not an elaborate plan built on invented facts."
+            ]
+          },
+          {
+            "heading": "Replan from observations, not optimism",
+            "paragraphs": [
+              "Execute a permitted step and inspect the actual result before marking it complete. Compare that result with the expected condition. If the evidence invalidates an assumption, preserve completed work and revise only the remaining steps. A tool failure, empty search result, and contradictory observation are different outcomes and may require different responses.",
+              "A useful loop ends when acceptance criteria are met, the user cancels, a permission is denied, or a revision, time, or cost limit is reached. Repeating the same failing step without new information is not progress. Return what was established and what remains unresolved; escalate when the remaining work requires access or judgment outside the allowed scope."
+            ]
+          }
+        ],
+        "flow": ["Define objective and limits", "Propose bounded plan", "Validate and execute next step", "Inspect observation", "Revise remaining plan or stop"],
+        "example": {
+          "title": "Investigate an incomplete delivery report",
+          "steps": [
+            {"label": "Plan", "detail": "For order 42, propose checking carrier tracking, then comparing delivery time with the customer's report. Allow at most two plan revisions and only read-only lookups."},
+            {"label": "Observe", "detail": "The authorized lookup returns 'label created' with no delivery event. Record that observation; the original assumption that a delivery timestamp exists is false."},
+            {"label": "Revise", "detail": "Replace the timestamp comparison with a warehouse handoff lookup. If that evidence is also unavailable within the limits, report the gap and escalate rather than claim delivery."}
+          ]
+        },
+        "question": {
+          "prompt": "A successful lookup contradicts the plan's assumption that delivery already occurred. What should happen next?",
+          "answer": 2,
+          "options": [
+            {"label": "Mark delivery confirmed because the lookup ran", "explanation": "A successful tool invocation does not mean its result supports the planner's hypothesis."},
+            {"label": "Repeat the same lookup without a limit", "explanation": "Unchanged evidence does not justify an unbounded retry loop or bypass the revision budget."},
+            {"label": "Record the observation and revise remaining steps within limits", "explanation": "Execution supplies evidence that can invalidate a plan; revise the remainder or stop explicitly."}
+          ]
+        },
+        "sources": [
+          {"title": "Anthropic: Building effective agents — agents and environmental feedback", "url": "https://www.anthropic.com/engineering/building-effective-agents"},
+          {"title": "OpenAI Agents SDK: Running agents — runtime loop and turn limits", "url": "https://openai.github.io/openai-agents-python/running_agents/"}
+        ]
+      },
+      "practice": {
+        "kind": "sequence",
+        "title": "Revise a delivery investigation plan",
+        "instructions": "Order the stages of this bounded investigation. The customer supplies order 42. The first read-only lookup returns 'label created', contradicting the plan's expected delivery timestamp. One revision remains, and the revised lookup finds no warehouse handoff record.",
+        "explanation": "Define success and limits, plan, and validate before executing. The observation comes from the actual lookup, not from the plan. Use it to revise only the remaining work, then stop with an explicit evidence gap when the revised search cannot resolve the case.",
+        "items": [
+          {"id": "revise", "label": "Use the remaining revision to replace timestamp comparison with a handoff lookup."},
+          {"id": "observe", "label": "Record 'label created' and reject the delivery-timestamp assumption."},
+          {"id": "objective", "label": "Define delivery-evidence criteria, read-only scope, and execution limits."},
+          {"id": "stop", "label": "Run the authorized revised lookup, find no record, and stop with an escalation summary."},
+          {"id": "execute", "label": "Validate access and arguments, then execute the carrier lookup."},
+          {"id": "plan", "label": "Propose carrier lookup followed by delivery-timestamp comparison."}
+        ],
+        "correctOrder": ["objective", "plan", "execute", "observe", "revise", "stop"]
+      }
+    },
+    {
+      "id": "execution-budgets",
+      "title": "Set budgets & stop conditions",
+      "notes": {
+        "topic": "Enforced resource envelopes",
+        "minutes": 4,
+        "lead": "An agent can keep finding one more useful step. A production runtime needs a resource envelope independent of that enthusiasm: maximum calls, elapsed time, and spend, plus conditions for successful and unsuccessful termination. Limits belong in executable control logic, not just in the prompt.",
+        "sections": [
+          {
+            "heading": "Count every path through the loop",
+            "paragraphs": [
+              "Choose what each counter measures. A model turn, a tool invocation, and a retry are not interchangeable. Count retries and delegated work against the parent envelope so splitting a job cannot create unlimited capacity. Reserve resources for the final answer before admitting more exploration, and check remaining allowances before each operation.",
+              "Time and cost require separate accounting. Use a wall-clock deadline and per-operation timeouts; cancel or stop scheduling work when the deadline arrives. Estimate cost conservatively before starting, then reconcile observed usage. Real prices depend on model and token usage, so a turn limit alone is not a spending cap."
+            ]
+          },
+          {
+            "heading": "Stop with an honest outcome",
+            "paragraphs": [
+              "Terminate successfully only when acceptance criteria are met. Also stop on cancellation, denied authorization, exhausted resources, or repeated no-progress observations. Return the completed evidence and unresolved work with a clear reason. A deadline does not turn an unfinished search into a complete answer, and cancellation does not undo side effects already performed.",
+              "For the exercise, use deliberately simplified fixed units: each research call costs two credits and four seconds; the required synthesis call costs three credits and two seconds. All calls are sequential and each counts once. These are teaching units, not provider prices or latency promises. Include the synthesis reservation in every total and reject work that would exceed any limit."
+            ]
+          }
+        ],
+        "flow": ["Set acceptance criteria and caps", "Reserve synthesis resources", "Check allowances before each call", "Record usage and progress", "Finish or stop with reason"],
+        "example": {
+          "title": "Fit research and synthesis into an envelope",
+          "steps": [
+            {"label": "Allocate", "detail": "Choose three research calls and one synthesis call. With a cap of five calls, twenty seconds, and eleven credits, reserve synthesis before research begins."},
+            {"label": "Calculate", "detail": "The reference allocation uses 3 + 1 = 4 calls, 3 × 4 + 2 = 14 seconds, and 3 × 2 + 3 = 9 credits. It leaves room but does not require spending it."},
+            {"label": "Terminate", "detail": "If three research calls establish the answer, synthesize and stop. If evidence remains missing, admit another call only if all caps allow it; otherwise return an explicitly incomplete result."}
+          ]
+        },
+        "question": {
+          "prompt": "The call counter still has room, but the next call plus reserved synthesis would exceed the cost cap. What should happen?",
+          "answer": 1,
+          "options": [
+            {"label": "Continue because only the call cap matters", "explanation": "Call, time, and cost limits are separate constraints and all must remain satisfied."},
+            {"label": "Reject more research and use the reserved synthesis", "explanation": "Preserving the closing reservation allows an honest final response without exceeding the budget."},
+            {"label": "Erase earlier usage and retry the research", "explanation": "Retries consume resources too; resetting counters would defeat the parent execution envelope."}
+          ]
+        },
+        "sources": [
+          {"title": "OpenAI Agents SDK: Running agents — max_turns termination", "url": "https://openai.github.io/openai-agents-python/running_agents/"},
+          {"title": "Anthropic: Building effective agents — stopping conditions and tradeoffs", "url": "https://www.anthropic.com/engineering/building-effective-agents"}
+        ]
+      },
+      "practice": {
+        "kind": "budget",
+        "title": "Reserve a bounded research run",
+        "instructions": "Allocate sequential calls using simplified fixed units, not real API prices. Each research call costs 2 credits and 4 seconds; synthesis costs 3 credits and 2 seconds. Require at least 3 research calls and exactly 1 synthesis call. Stay within 5 total calls, 20 seconds, and 11 credits. Stop early on success; stop with an incomplete result if evidence or resources run out.",
+        "explanation": "A passing reference is research = 3 and synthesis = 1: four calls, fourteen seconds, and nine credits. The synthesis reservation is mandatory. Four research calls also fit, but unused allowance is not a requirement to keep working. Retries would consume the same parent limits.",
+        "fields": [
+          {"id": "research", "label": "Research calls", "unit": "calls", "min": 0, "max": 6, "step": 1, "initial": 6},
+          {"id": "synthesis", "label": "Synthesis calls", "unit": "calls", "min": 0, "max": 2, "step": 1, "initial": 0}
+        ],
+        "constraints": [
+          {"label": "Allocate at least three research calls", "coefficients": {"research": 1}, "operator": ">=", "limit": 3},
+          {"label": "Reserve exactly one synthesis call", "coefficients": {"synthesis": 1}, "operator": "=", "limit": 1},
+          {"label": "Stay within five total calls", "coefficients": {"research": 1, "synthesis": 1}, "operator": "<=", "limit": 5},
+          {"label": "Stay within twenty sequential seconds", "coefficients": {"research": 4, "synthesis": 2}, "operator": "<=", "limit": 20},
+          {"label": "Stay within eleven simplified credits", "coefficients": {"research": 2, "synthesis": 3}, "operator": "<=", "limit": 11}
+        ],
+        "solution": {"research": 3, "synthesis": 1}
+      }
+    }
+  ]
+}
