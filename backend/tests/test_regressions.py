@@ -86,6 +86,47 @@ async def test_clean_flush_does_not_open_session(monkeypatch):
     factory.assert_not_called()
 
 
+async def test_idle_release_retries_with_backoff_and_evicts_after_recovery(monkeypatch):
+    mock_session(monkeypatch)
+    save = AsyncMock(side_effect=[OSError('offline'), OSError('offline'), SimpleNamespace(version=1)])
+    monkeypatch.setattr('app.realtime.state.board_repository.update_snapshot', save)
+    delays = []
+    sleep = asyncio.sleep
+    async def fast_sleep(delay):
+        delays.append(delay)
+        await sleep(0)
+    monkeypatch.setattr('app.realtime.state.asyncio.sleep', fast_sleep)
+    state = state_with_node()
+    state._dirty = True
+    registry = BoardStateRegistry()
+    registry._states[state.board_id] = state
+    with pytest.raises(OSError, match='offline'):
+        await registry.release(state.board_id, lambda: 0)
+    await registry._release_retries[state.board_id]
+    assert delays == [1.0, 2.0]
+    assert save.await_count == 3
+    assert registry.peek(state.board_id) is None
+    assert registry._release_retries == {}
+
+
+async def test_release_retry_does_not_evict_reconnected_board(monkeypatch):
+    mock_session(monkeypatch)
+    save = AsyncMock(side_effect=OSError('offline'))
+    monkeypatch.setattr('app.realtime.state.board_repository.update_snapshot', save)
+    monkeypatch.setattr('app.realtime.state.FLUSH_SECONDS', 0)
+    state = state_with_node()
+    state._dirty = True
+    registry = BoardStateRegistry()
+    registry._states[state.board_id] = state
+    count = 0
+    with pytest.raises(OSError):
+        await registry.release(state.board_id, lambda: count)
+    count = 1
+    await registry._release_retries[state.board_id]
+    assert registry.peek(state.board_id) is state
+    assert save.await_count == 1
+
+
 async def test_cancelled_flush_is_dirty(monkeypatch):
     mock_session(monkeypatch)
     monkeypatch.setattr('app.realtime.state.board_repository.update_snapshot', AsyncMock(side_effect=asyncio.CancelledError))

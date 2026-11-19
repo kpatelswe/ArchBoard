@@ -15,6 +15,7 @@ the one concurrency problem CRDTs genuinely erase.
 
 import asyncio
 import contextlib
+import logging
 import uuid
 from collections.abc import Callable
 
@@ -26,6 +27,7 @@ from app.repositories import board_repository
 from app.schemas.snapshot import BoardSnapshot
 
 FLUSH_SECONDS = 1.0
+logger = logging.getLogger(__name__)
 
 
 class BoardState:
@@ -169,6 +171,7 @@ class BoardStateRegistry:
     def __init__(self) -> None:
         self._states: dict[uuid.UUID, BoardState] = {}
         self._load_lock = asyncio.Lock()
+        self._release_retries: dict[uuid.UUID, asyncio.Task] = {}
 
     async def acquire(self, board_id: uuid.UUID) -> BoardState:
         # The lock closes the gap where two first-connections both see "not
@@ -195,9 +198,39 @@ class BoardStateRegistry:
                     state._flush_task.cancel()
                     with contextlib.suppress(asyncio.CancelledError, Exception):
                         await state._flush_task
-                await state.flush()  # last one out turns off the lights, durably
+                try:
+                    await state.flush()  # last one out turns off the lights, durably
+                except Exception:
+                    self._schedule_release_retry(board_id, state, remaining_connections)
+                    raise
+                if state._dirty:
+                    self._schedule_release_retry(board_id, state, remaining_connections)
                 if not state._dirty and remaining_connections() == 0:
                     self._states.pop(board_id, None)
+
+    def _schedule_release_retry(self, board_id, state, remaining_connections) -> None:
+        task = self._release_retries.get(board_id)
+        if task is None or task.done():
+            self._release_retries[board_id] = asyncio.create_task(
+                self._retry_release(board_id, state, remaining_connections)
+            )
+
+    async def _retry_release(self, board_id, state, remaining_connections) -> None:
+        delay = FLUSH_SECONDS
+        try:
+            while self.peek(board_id) is state:
+                await asyncio.sleep(delay)
+                try:
+                    await self.release(board_id, remaining_connections)
+                except Exception:
+                    logger.exception("board persistence retry failed: %s", board_id)
+                else:
+                    if not state._dirty or remaining_connections() > 0:
+                        return
+                delay = min(delay * 2, 60.0)
+        finally:
+            if self._release_retries.get(board_id) is asyncio.current_task():
+                self._release_retries.pop(board_id, None)
 
 
 registry = BoardStateRegistry()
