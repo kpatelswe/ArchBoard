@@ -82,7 +82,7 @@
             "heading": "Prepare the corpus",
             "paragraphs": [
               "Ingestion collects documents from their sources, extracts clean text, and records metadata such as owner, tenant, region, version, and last-updated date. That metadata is what later lets you filter by permission and prefer current documents, so capture it before anything else.",
-              "Chunking splits each document into passages small enough to retrieve precisely but large enough to stand on their own. A chunk that says “Revenue grew 3% over the previous quarter” is useless if it lost which company and which quarter. Anthropic’s contextual retrieval technique prepends a short document-level summary to each chunk before indexing; it reports that this reduced failed retrievals by 49%."
+              "Chunking splits each document into passages small enough to retrieve precisely but large enough to stand on their own. A chunk that says “Revenue grew 3% over the previous quarter” is useless if it lost which company and which quarter. Anthropic’s contextual retrieval technique prepends a short, chunk-specific explanation of where the chunk sits in its document before embedding and keyword indexing; it reports that contextual embeddings combined with contextual BM25 reduced failed retrievals by 49%."
             ]
           },
           {

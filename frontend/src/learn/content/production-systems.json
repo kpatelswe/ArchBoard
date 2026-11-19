@@ -6,9 +6,9 @@
       "id": "production",
       "title": "Queue work & retry safely",
       "notes": {
-        "topic": "Asynchronous execution",
+        "topic": "Production systems",
         "minutes": 4,
-        "lead": "An agent run may need several model calls, a slow tool, or a human decision. Instead of holding the user's connection open, accept the work durably, give the user a task ID, and let a worker execute it within limits.",
+        "lead": "An agent run may need several model calls, a slow tool, or a human decision. Instead of holding the user’s connection open, accept the work durably, give the user a task ID, and let a worker execute it within limits.",
         "sections": [
           {
             "heading": "Put policy before the queue",
@@ -27,7 +27,7 @@
           {
             "heading": "Retry only when it can help",
             "paragraphs": [
-              "Retry transient failures with increasing delays plus some randomness, a maximum attempt count, and an overall deadline. Do not retry invalid inputs or authorization denials unchanged. Route exhausted jobs to an operator-visible failure path such as a dead-letter queue, where failed messages can be inspected rather than retried forever.",
+              "Retry transient failures with exponential backoff with jitter (increasing delays plus some randomness), a maximum attempt count, and an overall deadline. Do not retry invalid inputs or authorization denials unchanged. Route exhausted jobs to an operator-visible failure path such as a dead-letter queue, where failed messages can be inspected rather than retried forever.",
               "Record queue wait, attempt count, and outcome using a correlation ID that follows the job. Rising wait time with stable execution time points toward a backlog; rising tool error rates with normal wait time point toward a dependency. Keep prompts, credentials, and customer records out of these signals."
             ]
           }
@@ -46,7 +46,7 @@
             },
             {
               "label": "Recover safely",
-              "detail": "The next worker recovers the result using the original operation key. The idempotent provider returns the existing refund, and the worker saves that outcome and acknowledges the job."
+              "detail": "The next worker recovers the result using the original idempotency key. The idempotent provider returns the existing refund, and the worker saves that outcome and acknowledges the job."
             }
           ]
         },
@@ -74,7 +74,7 @@
             "url": "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/standard-queues-at-least-once-delivery.html"
           },
           {
-            "title": "Amazon Builders' Library: Making retries safe with idempotent APIs",
+            "title": "Amazon Builders’ Library: Making retries safe with idempotent APIs",
             "url": "https://aws.amazon.com/builders-library/making-retries-safe-with-idempotent-APIs/"
           },
           {
@@ -95,7 +95,7 @@
       "id": "durable-state",
       "title": "Checkpoint, resume & cancel",
       "notes": {
-        "topic": "Recoverable workflows",
+        "topic": "Production systems",
         "minutes": 4,
         "lead": "A queue can deliver a job again, but it cannot tell the next worker which parts are already done. A checkpoint is a durable record of the next safe step and the information needed to take it.",
         "sections": [
@@ -109,7 +109,7 @@
           {
             "heading": "Separate intent from confirmed effect",
             "paragraphs": [
-              "Before an irreversible tool call, persist the exact action, scoped approval, operation key, and dispatch state. Make the transition that permits dispatch conditional on no cancellation having won and the required checks still passing. Once the provider confirms the write, persist its receipt and the next state. Do not mark a write complete just because it was scheduled.",
+              "Before an irreversible tool call, persist the exact action, scoped approval, idempotency key, and dispatch state. Make the transition that permits dispatch conditional on no cancellation having won and the required checks still passing. Once the provider confirms the write, persist its receipt and the next state. Do not mark a write complete just because it was scheduled.",
               "A crash can land between the provider applying the write and your checkpoint recording the receipt. On resume, check the provider for the original operation or use its documented idempotent recovery procedure where appropriate. If the outcome cannot be determined, stop and escalate instead of sending a new write or claiming the first one failed."
             ]
           },
@@ -127,7 +127,7 @@
           "steps": [
             {
               "label": "Checkpoint intent",
-              "detail": "The worker saves the approved refund and its provider key. It wins the dispatch transition before a cancellation request has been recorded."
+              "detail": "The worker saves the approved refund and its idempotency key. It wins the dispatch transition before a cancellation request has been recorded."
             },
             {
               "label": "Resume after a crash",
@@ -171,12 +171,12 @@
       "practice": {
         "kind": "sequence",
         "title": "Recover a refund at the crash boundary",
-        "instructions": "Order this run from approved intent to final status. The worker dispatches the refund, crashes before saving the receipt, and a cancel request arrives during the outage. The provider has a read-only lookup by operation key and reports that the refund committed.",
+        "instructions": "Order this run from approved intent to final status. The worker dispatches the refund, crashes before saving the receipt, and a cancel request arrives during the outage. The provider has a read-only lookup by idempotency key and reports that the refund committed.",
         "items": [
           { "id": "reconcile", "label": "Look up the dispatched operation by its original key without issuing a new refund." },
           { "id": "dispatch", "label": "Pass the checks and cancellation gate, mark dispatch, and submit the saved write." },
           { "id": "report", "label": "Save the confirmed receipt, stop follow-up work, and report that the refund went through." },
-          { "id": "prepare", "label": "Checkpoint the exact approved write and its stable operation key before calling the provider." },
+          { "id": "prepare", "label": "Checkpoint the exact approved write and its stable idempotency key before calling the provider." },
           { "id": "resume", "label": "After the crash, reload the dispatch checkpoint and notice the recorded cancel request." }
         ],
         "correctOrder": ["prepare", "dispatch", "resume", "reconcile", "report"],
@@ -187,15 +187,15 @@
       "id": "observability",
       "title": "Trace the system without leaking data",
       "notes": {
-        "topic": "Correlated, minimized telemetry",
+        "topic": "Production systems",
         "minutes": 4,
-        "lead": "When an agent run is slow, the final response can't tell you whether it waited in the queue, spent time generating text, or retried a tool. You need signals that connect those steps without making a second copy of the user's conversation.",
+        "lead": "When an agent run is slow, the final response can’t tell you whether it waited in the queue, spent time generating text, or retried a tool. You need signals that connect those steps without making a second copy of the user’s conversation.",
         "sections": [
           {
             "heading": "Use the signal that answers the question",
             "paragraphs": [
               "Metrics show patterns across runs: queue wait percentiles, model token usage, tool error rates, and completion rates. Use a small set of labels such as release version and outcome category. Leave task IDs out of metric labels: a unique label per job creates a new time series per job instead of a stable aggregate.",
-              "A trace connects spans, which are timed operations such as queue publish, retrieval, model generation, or a tool attempt. Propagate trace context across services, including message metadata, so the worker's trace can connect to intake. Use an opaque run ID to link structured events across retries and long approval waits. Neither ID is a credential or permission to look up the job."
+              "A trace connects spans, which are timed operations such as queue publish, retrieval, model generation, or a tool attempt. Propagate trace context across services, including message metadata, so the worker’s trace can connect to intake. Use an opaque run ID to link structured events across retries and long approval waits. Neither ID is a credential or permission to look up the job."
             ]
           },
           {
@@ -237,7 +237,7 @@
               "explanation": "A retry still carries sensitive customer and transaction data. The error category and attempt number are enough to count retries."
             },
             {
-              "label": "Add the customer's email to every metric label.",
+              "label": "Add the customer’s email to every metric label.",
               "explanation": "This exposes personal data, creates many time series, and still does not distinguish individual attempts reliably."
             }
           ]
@@ -287,7 +287,7 @@
       "id": "deployment",
       "title": "Ship, version & roll back",
       "notes": {
-        "topic": "Safe releases for stateful agents",
+        "topic": "Production systems",
         "minutes": 4,
         "lead": "Changing a prompt, model, or tool schema can change what an agent does even when its application code is unchanged. Treat those changes as releases, and plan what happens to jobs that are still queued or paused when the release changes.",
         "sections": [

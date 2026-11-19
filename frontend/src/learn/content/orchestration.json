@@ -6,7 +6,7 @@
       "id": "routing",
       "title": "Route work to the right path",
       "notes": {
-        "topic": "Explicit routing decisions",
+        "topic": "Orchestration",
         "minutes": 4,
         "lead": "A support inbox contains different jobs: explain a feature, investigate a failed login, or request a refund. Routing chooses a suitable process before solving the request. Separate paths can use different prompts and tools without giving every request every capability.",
         "sections": [
@@ -21,7 +21,7 @@
             "heading": "Make uncertainty a real path",
             "paragraphs": [
               "Define what happens when the message is empty, matches several categories, or produces an invalid label. A clarification question is often cheaper and safer than guessing. If one clarification still leaves a sensitive request ambiguous, escalate to a human with the original request and the unresolved distinction.",
-              "Fallback must be explicit rather than silently choosing the most powerful handler. A documentation-only fallback may answer general questions, but it must not claim to resolve a billing incident. Evaluate routing with representative examples, including mixed requests and unknown categories; a model's stated confidence alone is not proof of correct classification."
+              "Fallback must be explicit rather than silently choosing the most powerful handler. A documentation-only fallback may answer general questions, but it must not claim to resolve a billing incident. Evaluate routing with representative examples, including mixed requests and unknown categories; a model’s stated confidence alone is not proof of correct classification."
             ]
           }
         ],
@@ -29,7 +29,7 @@
         "example": {
           "title": "A mixed billing and login request",
           "steps": [
-            {"label": "Input", "detail": "A customer writes, 'I cannot sign in, and I want my money back.' Both technical support and billing criteria match."},
+            {"label": "Input", "detail": "A customer writes, “I cannot sign in, and I want my money back.” Both technical support and billing criteria match."},
             {"label": "Clarify", "detail": "The router asks which problem to address first instead of assuming the login problem authorizes a refund."},
             {"label": "Dispatch", "detail": "The customer chooses billing. The application validates the billing label and sends the request to billing review, where identity and order access are checked separately."}
           ]
@@ -52,7 +52,7 @@
         "kind": "scenario",
         "title": "Design the support inbox router",
         "instructions": "Select every appropriate decision. Your inbox accepts documentation, technical-support, and billing requests. Some messages are empty or mixed, and the classifier can return invalid labels. Billing actions require separate authorization.",
-        "explanation": "A useful router has explicit destinations, validation, and a bounded uncertainty path. Classification chooses a process; it does not authorize the process's sensitive actions. Empty and ambiguous inputs need a fallback, not arbitrary dispatch.",
+        "explanation": "A useful router has explicit destinations, validation, and a bounded uncertainty path. Classification chooses a process; it does not authorize the process’s sensitive actions. Empty and ambiguous inputs need a fallback, not arbitrary dispatch.",
         "options": [
           {"label": "Validate the route against a fixed set before dispatch.", "feedback": "Correct: an unexpected model label must not become an arbitrary executable destination."},
           {"label": "Ask a clarification for empty or mixed requests; escalate if unresolved.", "feedback": "Correct: this gives missing information and ambiguity an explicit, bounded recovery path."},
@@ -67,21 +67,21 @@
       "id": "workflow-dags",
       "title": "Compose workflows & DAGs",
       "notes": {
-        "topic": "Dependencies before concurrency",
+        "topic": "Orchestration",
         "minutes": 4,
         "lead": "A workflow makes task dependencies explicit. A directed acyclic graph, or DAG, represents tasks as nodes and required precedence as edges. It has no dependency cycles. This lets a scheduler identify which tasks can run now without guessing from a written checklist.",
         "sections": [
           {
             "heading": "Edges describe required inputs",
             "paragraphs": [
-              "Draw an edge from A to B when B needs A's validated output. For a release brief, first validate the release identifier, then retrieve its changelog and test report. Drafting depends on both retrieval results. Publishing depends on reviewing the draft. A task is ready only when all required predecessors have completed successfully.",
+              "Draw an edge from A to B when B needs A’s validated output. For a release brief, first validate the release identifier, then retrieve its changelog and test report. Drafting depends on both retrieval results. Publishing depends on reviewing the draft. A task is ready only when all required predecessors have completed successfully.",
               "Validate intermediate outputs, not just task completion flags. A retrieval request that returned an empty document is not automatically usable evidence. Define a failure policy at each join: stop, request missing evidence, or explicitly produce a partial answer. Do not silently synthesize a complete release assessment from missing test results."
             ]
           },
           {
             "heading": "Parallelize independent work safely",
             "paragraphs": [
-              "After identifier validation, changelog retrieval and test-report retrieval can run together because neither needs the other's result. Give each branch its own output slot and merge only after both finish. Parallel execution reduces waiting on independent operations; it does not remove dependencies or make shared writes safe.",
+              "After identifier validation, changelog retrieval and test-report retrieval can run together because neither needs the other’s result. Give each branch its own output slot and merge only after both finish. Parallel execution reduces waiting on independent operations; it does not remove dependencies or make shared writes safe.",
               "Two branches that overwrite the same draft are not safely independent. Assign separate artifacts, serialize mutations, or use a deliberate merge rule. Bound concurrency to protect downstream services. A topological order is any ordering that respects every edge, so independent branches may appear in either order. If a teaching exercise needs one exact sequence, represent their concurrent launch as one stage."
             ]
           }
@@ -129,7 +129,7 @@
       "id": "planning",
       "title": "Plan, execute & replan",
       "notes": {
-        "topic": "Plans are revisable hypotheses",
+        "topic": "Orchestration",
         "minutes": 4,
         "lead": "A plan describes intended work; it is not evidence that work happened. In an uncertain task, separate a planner that proposes steps from an executor that checks and performs them. Feed real observations back into planning instead of treating the initial checklist as a prophecy.",
         "sections": [
@@ -152,16 +152,16 @@
         "example": {
           "title": "Investigate an incomplete delivery report",
           "steps": [
-            {"label": "Plan", "detail": "For order 42, propose checking carrier tracking, then comparing delivery time with the customer's report. Allow at most two plan revisions and only read-only lookups."},
-            {"label": "Observe", "detail": "The authorized lookup returns 'label created' with no delivery event. Record that observation; the original assumption that a delivery timestamp exists is false."},
+            {"label": "Plan", "detail": "For order 42, propose checking carrier tracking, then comparing delivery time with the customer’s report. Allow at most two plan revisions and only read-only lookups."},
+            {"label": "Observe", "detail": "The authorized lookup returns “label created” with no delivery event. Record that observation; the original assumption that a delivery timestamp exists is false."},
             {"label": "Revise", "detail": "Replace the timestamp comparison with a warehouse handoff lookup. If that evidence is also unavailable within the limits, report the gap and escalate rather than claim delivery."}
           ]
         },
         "question": {
-          "prompt": "A successful lookup contradicts the plan's assumption that delivery already occurred. What should happen next?",
+          "prompt": "A successful lookup contradicts the plan’s assumption that delivery already occurred. What should happen next?",
           "answer": 2,
           "options": [
-            {"label": "Mark delivery confirmed because the lookup ran", "explanation": "A successful tool invocation does not mean its result supports the planner's hypothesis."},
+            {"label": "Mark delivery confirmed because the lookup ran", "explanation": "A successful tool invocation does not mean its result supports the planner’s hypothesis."},
             {"label": "Repeat the same lookup without a limit", "explanation": "Unchanged evidence does not justify an unbounded retry loop or bypass the revision budget."},
             {"label": "Record the observation and revise remaining steps within limits", "explanation": "Execution supplies evidence that can invalidate a plan; revise the remainder or stop explicitly."}
           ]
@@ -174,11 +174,11 @@
       "practice": {
         "kind": "sequence",
         "title": "Revise a delivery investigation plan",
-        "instructions": "Order the stages of this bounded investigation. The customer supplies order 42. The first read-only lookup returns 'label created', contradicting the plan's expected delivery timestamp. One revision remains, and the revised lookup finds no warehouse handoff record.",
+        "instructions": "Order the stages of this bounded investigation. The customer supplies order 42. The first read-only lookup returns “label created”, contradicting the plan’s expected delivery timestamp. One revision remains, and the revised lookup finds no warehouse handoff record.",
         "explanation": "Define success and limits, plan, and validate before executing. The observation comes from the actual lookup, not from the plan. Use it to revise only the remaining work, then stop with an explicit evidence gap when the revised search cannot resolve the case.",
         "items": [
           {"id": "revise", "label": "Use the remaining revision to replace timestamp comparison with a handoff lookup."},
-          {"id": "observe", "label": "Record 'label created' and reject the delivery-timestamp assumption."},
+          {"id": "observe", "label": "Record “label created” and reject the delivery-timestamp assumption."},
           {"id": "objective", "label": "Define delivery-evidence criteria, read-only scope, and execution limits."},
           {"id": "stop", "label": "Run the authorized revised lookup, find no record, and stop with an escalation summary."},
           {"id": "execute", "label": "Validate access and arguments, then execute the carrier lookup."},
@@ -191,7 +191,7 @@
       "id": "execution-budgets",
       "title": "Set budgets & stop conditions",
       "notes": {
-        "topic": "Enforced resource envelopes",
+        "topic": "Orchestration",
         "minutes": 4,
         "lead": "An agent can keep finding one more useful step. A production runtime needs a resource envelope independent of that enthusiasm: maximum calls, elapsed time, and spend, plus conditions for successful and unsuccessful termination. Limits belong in executable control logic, not just in the prompt.",
         "sections": [

@@ -6,7 +6,7 @@
       "id": "evaluation-datasets",
       "title": "Build evaluations that matter",
       "notes": {
-        "topic": "Evaluation",
+        "topic": "Evaluation & capstone",
         "minutes": 5,
         "lead": "Every earlier module added a control: a schema, a tool contract, a budget, an approval gate. An evaluation is how you prove those controls still work after you change a prompt, a model, or a tool. A good one measures the outcomes users and operators care about on cases you did not tune against.",
         "sections": [
@@ -136,7 +136,7 @@
       "id": "cost-latency",
       "title": "Balance quality, cost & latency",
       "notes": {
-        "topic": "Evaluation",
+        "topic": "Evaluation & capstone",
         "minutes": 5,
         "lead": "Every request your agent handles spends money and time: input tokens, output tokens, tool calls, and retries. Optimizing either one is easy if you ignore quality. The real job is to find the cheapest, fastest configuration that still passes the evaluation you built in the previous lesson.",
         "sections": [
@@ -314,7 +314,7 @@
       "id": "failure-testing",
       "title": "Test failures, not just happy paths",
       "notes": {
-        "topic": "Evaluation",
+        "topic": "Evaluation & capstone",
         "minutes": 5,
         "lead": "Most of the architecture in this course exists for bad days: tools time out, messages are delivered twice, documents contain hostile instructions, and approvals expire. A test suite that only replays polite, well-formed requests never exercises any of it. Failure tests deliberately create those conditions and check a measurable expected behavior.",
         "sections": [
@@ -328,7 +328,7 @@
           {
             "heading": "Make the expected behavior measurable",
             "paragraphs": [
-              "“Handles errors gracefully” cannot fail. Instead write the observable result: after a payment tool timeout, the runtime retries once with the same idempotency key, records one charge, and tells the user the status. After an injected instruction, zero tool calls leave the allowlist and no data is sent to an unapproved destination.",
+              "“Handles errors gracefully” cannot fail. Instead write the observable result: after a payment tool timeout, the runtime retries once with the same idempotency key against a payment service that deduplicates by key, records one charge, and tells the user the status. After an injected instruction, zero tool calls leave the allowlist and no data is sent to an unapproved destination.",
               "Assert on the trace and on external state, not on the model’s self-report. A test passes when the ledger shows one refund, the audit log shows a rejected call, or the response states that evidence is missing. Track attack success rate and duplicate side effects as numbers, with zero as the target for safety cases."
             ]
           },
@@ -356,7 +356,7 @@
             },
             {
               "label": "Expectation",
-              "detail": "The runtime retries once with the same idempotency key, the ledger shows exactly one refund, and the user sees a confirmed status."
+              "detail": "The runtime retries once with the same idempotency key against a payment service that deduplicates by key, the ledger shows exactly one refund, and the user sees a confirmed status."
             },
             {
               "label": "Result",

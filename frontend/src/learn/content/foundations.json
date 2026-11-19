@@ -6,7 +6,7 @@
       "id": "first-call",
       "title": "Start with a model",
       "notes": {
-        "topic": "The foundations",
+        "topic": "Foundations",
         "minutes": 3,
         "lead": "A language model can write an answer. That does not mean it can look up an order, remember a customer, or issue a refund. Start by understanding what one model call actually does.",
         "sections": [
@@ -88,7 +88,7 @@
       "id": "context-windows",
       "title": "Tokens, context & model limits",
       "notes": {
-        "topic": "The foundations",
+        "topic": "Foundations",
         "minutes": 5,
         "lead": "Every model call has a hard size limit called the context window. Instructions, evidence, conversation history, and the answer the model writes all compete for the same space, so an architect has to budget it on purpose instead of discovering the limit in production.",
         "sections": [
@@ -271,7 +271,7 @@
       "id": "structured-output",
       "title": "Make outputs predictable",
       "notes": {
-        "topic": "The foundations",
+        "topic": "Foundations",
         "minutes": 5,
         "lead": "Free-form text is fine for a person to read, but code that acts on a model’s answer needs fields it can rely on. Structured output turns a reply into typed data, and your application decides what happens when that data is missing, refused, or wrong.",
         "sections": [
@@ -401,7 +401,7 @@
       "id": "agents-vs-workflows",
       "title": "When do you need an agent?",
       "notes": {
-        "topic": "The foundations",
+        "topic": "Foundations",
         "minutes": 5,
         "lead": "Not every model-powered feature needs an agent. The architectural choice is about who controls the next step: your code following a predefined path, or the model deciding dynamically. Pick the least autonomy that solves the problem, and add control around whatever autonomy you keep.",
         "sections": [

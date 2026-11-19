@@ -44,7 +44,7 @@
           "steps": [
             {
               "label": "Triage",
-              "detail": "The support agent recognises a duplicate charge and calls transfer_to_billing with reason duplicate_charge and the order ID."
+              "detail": "The support agent recognizes a duplicate charge and calls transfer_to_billing with reason duplicate_charge and the order ID."
             },
             {
               "label": "Check",
