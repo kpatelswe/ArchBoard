@@ -1,7 +1,7 @@
 import type { Node, XYPosition } from '@xyflow/react'
 import type * as Y from 'yjs'
 import { canonicalNode } from '../lib/api'
-import { LOCAL_ORIGIN, upsertNode } from '../lib/boardDoc'
+import { LOCAL_ORIGIN, nodesMap, upsertNode } from '../lib/boardDoc'
 import { CATALOG, type NodeKind } from './catalog'
 
 export function createCanvasNode(kind: NodeKind, position: XYPosition): Node {
@@ -15,7 +15,11 @@ export function createCanvasNode(kind: NodeKind, position: XYPosition): Node {
 }
 
 export function duplicateNodes(doc: Y.Doc, nodes: Node[]): Node[] {
-  const copies = nodes.filter((node) => node.selected).map((node) => ({
+  const selected = nodes.filter((node) => node.selected)
+  if (selected.length && nodesMap(doc).size + selected.length > 500) {
+    throw new Error('This board supports up to 500 components. Remove some before duplicating.')
+  }
+  const copies = selected.map((node) => ({
     ...canonicalNode(node),
     id: crypto.randomUUID(),
     position: { x: node.position.x + 32, y: node.position.y + 32 },

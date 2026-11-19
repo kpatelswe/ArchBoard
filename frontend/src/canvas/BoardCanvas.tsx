@@ -67,6 +67,7 @@ function Canvas({
   const { screenToFlowPosition, getNodes } = useReactFlow()
   const surfaceRef = useRef<HTMLDivElement>(null)
   const [showShortcuts, setShowShortcuts] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
   const lastPositionSend = useRef(new Map<string, number>())
   const lastCursorSend = useRef(0)
 
@@ -263,8 +264,13 @@ function Canvas({
         if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'd') {
           event.preventDefault()
           if (!writable) return
-          const copies = duplicateNodes(writable, getNodes())
-          if (copies.length) setNodes((current) => [...current.map((node) => ({ ...node, selected: false })), ...copies])
+          try {
+            const copies = duplicateNodes(writable, getNodes())
+            setActionError(null)
+            if (copies.length) setNodes((current) => [...current.map((node) => ({ ...node, selected: false })), ...copies])
+          } catch (error) {
+            setActionError(error instanceof Error ? error.message : 'Could not duplicate components.')
+          }
         }
       }}>
         {!readOnly && <Palette onAdd={addNode} disabled={!writable} />}
@@ -311,6 +317,10 @@ function Canvas({
             <MiniMap pannable zoomable style={{ width: 140, height: 90 }} />
             {subscribe && <RemoteCursors subscribe={subscribe} peers={peers} />}
           </ReactFlow>
+          {actionError && <div className="canvas__notice" role="status">
+            {actionError}
+            <button type="button" aria-label="Dismiss canvas message" onClick={() => setActionError(null)}>×</button>
+          </div>}
           {writable && nodes.length === 0 && (
             <div className="canvas__onboarding">
               <span className="canvas__eyebrow">YOUR NEXT BIG IDEA STARTS HERE</span>

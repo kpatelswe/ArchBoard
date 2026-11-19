@@ -109,3 +109,19 @@ test('new nodes and selected duplicates write through the CRDT without transient
   doc.destroy()
   replica.destroy()
 })
+
+test('duplication refuses the whole selection above 500 nodes without writing', () => {
+  const doc = new Y.Doc()
+  const selected = { ...createCanvasNode('service', { x: 0, y: 0 }), selected: true }
+  doc.transact(() => {
+    for (let i = 0; i < 499; i++) upsertNode(doc, { ...selected, id: String(i) })
+  })
+  assert.throws(() => duplicateNodes(doc, [selected, { ...selected, id: 'other' }]), /500 components/)
+  assert.equal(flowFromDoc(doc).nodes.length, 499)
+  assert.equal(duplicateNodes(doc, [selected]).length, 1)
+  assert.equal(flowFromDoc(doc).nodes.length, 500)
+  assert.throws(() => duplicateNodes(doc, [selected]), /500 components/)
+  assert.deepEqual(duplicateNodes(doc, []), [])
+  assert.equal(flowFromDoc(doc).nodes.length, 500)
+  doc.destroy()
+})
