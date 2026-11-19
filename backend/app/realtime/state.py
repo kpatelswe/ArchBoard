@@ -78,7 +78,10 @@ class BoardState:
             "edges": list(self.doc.get("edges", type=Map).to_py().values()),
         }
         for node in raw['nodes']:
-            data = dict(node.get('data', {}))
+            data = node.get('data', {})
+            data = dict(data) if isinstance(data, dict) else {}
+            if 'metadata' in data and not isinstance(data['metadata'], dict):
+                data['metadata'] = {}
             if 'data:label' in node:
                 data['label'] = node.pop('data:label')
             if 'data:technology' in node:

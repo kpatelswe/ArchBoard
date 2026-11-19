@@ -97,6 +97,22 @@ def test_materialize_legacy_and_field_edits():
     assert BoardState(uuid.uuid4(), Doc(), 0).to_snapshot() == {'nodes': [], 'edges': []}
 
 
+@pytest.mark.parametrize('metadata', [None, 42, 'invalid', ['invalid'], {}])
+async def test_malformed_metadata_does_not_block_persistence(monkeypatch, metadata):
+    mock_session(monkeypatch)
+    save = AsyncMock(return_value=SimpleNamespace(version=1))
+    monkeypatch.setattr('app.realtime.state.board_repository.update_snapshot', save)
+    state = state_with_node()
+    node = state.doc.get('nodes', type=Map)['n']
+    node['data'] = {'kind': 'service', 'label': 'old', 'metadata': metadata}
+    node['data:technology'] = 'Go'
+    state._dirty = True
+    await state.flush()
+    snapshot = BoardSnapshot.model_validate(save.call_args.kwargs['snapshot'])
+    assert snapshot.nodes[0].data.metadata == {'technology': 'Go'}
+    assert not state._dirty
+
+
 @pytest.mark.parametrize('remaining_same_user', [True, False])
 async def test_presence_only_leaves_on_last_connection(monkeypatch, remaining_same_user):
     manager = ConnectionManager()
