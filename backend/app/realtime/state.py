@@ -44,6 +44,9 @@ def _seed(board_id: uuid.UUID, version: int, snapshot: dict) -> bytes:
     """
     digest = hashlib.sha256(f"{board_id}:{version}".encode()).digest()
     doc = Doc(client_id=int.from_bytes(digest[:4], "big"))
+    # Always write something, so even an empty board's seed has a clock that
+    # later docs must contain to descend from it.
+    doc.get("seed", type=Map)["version"] = version
     nodes = doc.get("nodes", type=Map)
     edges = doc.get("edges", type=Map)
     parsed = BoardSnapshot.model_validate(snapshot)

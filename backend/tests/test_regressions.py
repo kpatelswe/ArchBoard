@@ -489,3 +489,32 @@ async def test_restash_uses_fresh_journal_key(monkeypatch, fake_redis):
     await unsaved.discard(*first)  # a recovering worker clears what it read
     await state.stash_unsaved()
     assert fake_redis.data and not set(fake_redis.data) & first
+
+
+async def test_stranded_edit_on_empty_board_never_overwrites_reseeded_rest_save(monkeypatch, fake_redis):
+    mock_session(monkeypatch)
+    board_id = uuid.uuid4()
+    monkeypatch.setattr('app.realtime.state.board_repository.get', AsyncMock(return_value=stored_board(0, None)))
+    registry = BoardStateRegistry()
+    state = await registry.acquire(board_id)
+    state.doc.get('nodes', type=Map)['a'] = Map({**node_snapshot('stale')['nodes'][0], 'id': 'a'})
+    state._dirty = True
+    monkeypatch.setattr('app.realtime.state.board_repository.update_snapshot', AsyncMock(side_effect=OSError('db down')))
+    with pytest.raises(OSError):
+        await registry.release(board_id, lambda: 0)
+    registry._retries[board_id][1].cancel()  # worker restart
+
+    # A REST save replaced the board and a live session re-seeded and saved it.
+    fake_redis_data = dict(fake_redis.data)
+    fake_redis.data.clear()
+    monkeypatch.setattr('app.realtime.state.board_repository.get',
+                        AsyncMock(return_value=stored_board(1, None, node_snapshot('rest'))))
+    reseeded = await BoardState.load(board_id)
+    fake_redis.data.update(fake_redis_data)
+    monkeypatch.setattr('app.realtime.state.board_repository.get',
+                        AsyncMock(return_value=stored_board(2, reseeded.doc, node_snapshot('rest'))))
+    save = AsyncMock(return_value=SimpleNamespace(version=3))
+    monkeypatch.setattr('app.realtime.state.board_repository.update_snapshot', save)
+    await BoardStateRegistry().recover_unsaved()
+    save.assert_not_awaited()
+    assert not fake_redis.data
