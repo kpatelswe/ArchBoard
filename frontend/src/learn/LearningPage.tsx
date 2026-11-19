@@ -43,10 +43,16 @@ export function LearningPage() {
     const nav = lessonNavRef.current
     const active = nav?.querySelector<HTMLButtonElement>('[aria-current="step"]')
     if (!nav || !active) return
-    const bounds = nav.getBoundingClientRect()
-    const tile = active.getBoundingClientRect()
-    const offset = tile.left < bounds.left ? tile.left - bounds.left - 18 : tile.right > bounds.right ? tile.right - bounds.right + 18 : 0
-    if (offset) nav.scrollBy({ left: offset, behavior: 'instant' })
+    function revealActiveLesson() {
+      const bounds = nav!.getBoundingClientRect()
+      const tile = active!.getBoundingClientRect()
+      const offset = tile.left < bounds.left ? tile.left - bounds.left - 18 : tile.right > bounds.right ? tile.right - bounds.right + 18 : 0
+      if (offset) nav!.scrollBy({ left: offset, behavior: 'instant' })
+    }
+    revealActiveLesson()
+    const observer = new ResizeObserver(revealActiveLesson)
+    observer.observe(nav)
+    return () => observer.disconnect()
   }, [progress.active])
 
   useEffect(() => {
