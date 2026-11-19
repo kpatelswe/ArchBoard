@@ -262,8 +262,8 @@ function Canvas({
         }
         if (event.key === 'Escape') setShowShortcuts(false)
         if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'd') {
-          event.preventDefault()
           if (!writable) return
+          event.preventDefault()
           try {
             const copies = duplicateNodes(writable, getNodes())
             setActionError(null)
