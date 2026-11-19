@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowLeft, ArrowRight, BookOpen, Bot, Braces, Check, CheckCircle2, ChevronRight, CircleDashed, Clock3, Cpu, Database, GitBranch, Layers3, Lightbulb, Link2, MousePointer2, Network, Play, Plus, RotateCcw, ShieldCheck, Sparkles, Terminal, UserRound, Workflow, X, type LucideIcon } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Bot, Braces, Check, CheckCircle2, ChevronRight, CircleDashed, Cpu, Database, GitBranch, Layers3, Lightbulb, Link2, MousePointer2, Network, Play, Plus, RotateCcw, ShieldCheck, Terminal, UserRound, Workflow, X, type LucideIcon } from 'lucide-react'
 import { COMPONENTS, LESSONS, PROGRESS_KEY, checkArchitecture, connect, connectionId, readProgress, removeComponent, starterFor, type Architecture, type ComponentId } from './curriculum'
 import './learning.css'
 
@@ -102,7 +102,7 @@ export function LearningPage() {
       setAnnouncement('Architecture checks passed. Step through the request trace below.')
     } else {
       setTraceIndex(null)
-      setAnnouncement('Not quite yet. Review the unmet architecture checks below the canvas.')
+      setAnnouncement('Not quite yet. Review the unmet design checks.')
     }
   }
 
@@ -112,62 +112,55 @@ export function LearningPage() {
     <div className="learning">
       <header className="learning__nav">
         <Link to="/" className="learning__brand" aria-label="ArchBoard home">
-          <span className="learning__brand-icon"><Workflow size={21} strokeWidth={1.7} /></span>
-          ArchBoard<span className="learning__brand-divider">/</span><span className="learning__nav-label">WORKSHOP</span>
+          <Workflow size={21} strokeWidth={1.7} />
+          ARCH<span className="learning__brand-slash">/</span>BOARD
         </Link>
-        <div className="learning__nav-status"><span className="learning__live-dot" /> Local playground <span className="learning__nav-status-divider">/</span> No API keys needed</div>
+        <span className="learning__nav-label">Learning studio</span>
         <Link to="/" className="learning__back">Open whiteboard <ArrowRight size={15} /></Link>
       </header>
 
-      <div className="learning__body">
-        <aside className="learning__syllabus" aria-label="Learning path">
-          <Link to="/" className="learning__rail-back"><ArrowLeft size={14} /> ALL WORKSPACES</Link>
-          <div className="learning__course-icon"><Workflow size={25} strokeWidth={1.5} /><span>0 → 1</span></div>
-          <div className="learning__eyebrow">INTERACTIVE FIELD GUIDE</div>
-          <h1>Agent <br />architecture<span>.</span></h1>
-          <p className="learning__intro">From your first model call<br />to a system you can reason about.</p>
-          <div className="learning__course-meta"><span><BookOpen size={12} /> 6 labs</span><span><Clock3 size={12} /> 28 min</span></div>
-          <div className="learning__progress-label"><span>YOUR PROGRESS</span><strong>{progress.completed.length}<span> / {LESSONS.length}</span></strong></div>
-          <progress className="learning__progress" max={LESSONS.length} value={progress.completed.length} aria-label="Lessons completed" />
+      <main className="learning__main">
+        <section className="learning__path" aria-label="Learning path">
+          <div className="learning__path-heading">
+            <div><h1>Agent architecture</h1><p>Build a system, one decision at a time.</p></div>
+            <div className="learning__progress-group">
+              <span>{progress.completed.length} of {LESSONS.length} complete</span>
+              <progress max={LESSONS.length} value={progress.completed.length} aria-label="Lessons completed" />
+            </div>
+          </div>
           <nav className="learning__lessons" aria-label="Lessons">
             {LESSONS.map((item, index) => (
               <button type="button" key={item.id} onClick={() => selectLesson(index)} className={`learning__lesson ${lesson.id === item.id ? 'is-active' : ''}`} aria-current={lesson.id === item.id ? 'step' : undefined}>
-                <span className={`learning__lesson-number ${progress.completed.includes(item.id) ? 'is-done' : ''}`}>{progress.completed.includes(item.id) ? <Check size={13} aria-label="Completed" /> : String(index + 1).padStart(2, '0')}</span>
-                <span><strong>{item.title}</strong><small>{item.minutes} MIN · {progress.completed.includes(item.id) ? 'COMPLETED' : lesson.id === item.id ? 'IN PROGRESS' : 'HANDS-ON LAB'}</small></span>
-                {lesson.id === item.id && <ChevronRight size={14} />}
+                <span className={`learning__lesson-number ${progress.completed.includes(item.id) ? 'is-done' : ''}`}>{progress.completed.includes(item.id) ? <Check size={14} aria-label="Completed" /> : String(index + 1).padStart(2, '0')}</span>
+                <span><strong>{item.title}</strong><small>{item.minutes} min</small></span>
+                <ChevronRight size={14} />
               </button>
             ))}
           </nav>
-          <div className="learning__path-note"><Sparkles size={16} /><p>Less theory.<br /><strong>More connecting the dots.</strong></p></div>
-          <p className="learning__save-note">{storageFailed ? 'Storage unavailable. Progress lasts for this visit.' : 'Saved on this device. Pick up where you left off.'}</p>
-        </aside>
+        </section>
 
-        <main className="learning__main">
-          <div className="learning__breadcrumb">Workshop <ChevronRight size={12} /> Agent architecture <ChevronRight size={12} /><span>Lab {String(lessonIndex + 1).padStart(2, '0')}</span></div>
-          <div className="learning__heading">
-            <div>
-              <div className="learning__eyebrow"><span className="learning__title-line" />{lesson.subtitle}</div>
-              <h2 ref={headingRef} tabIndex={-1}>{lesson.title}</h2>
-            </div>
-            <div className="learning__heading-meta">
-              <span className="learning__badge">{completed ? <CheckCircle2 size={13} /> : <Clock3 size={13} />}{completed ? 'Completed' : `${lesson.minutes} min lab`}</span>
-              <span className="learning__lab-number">{String(lessonIndex + 1).padStart(2, '0')}<span>/06</span></span>
-            </div>
+        <div className="learning__heading">
+          <div>
+            <div className="learning__eyebrow">LESSON {String(lessonIndex + 1).padStart(2, '0')} / {String(LESSONS.length).padStart(2, '0')} <span>·</span> {lesson.minutes} MIN</div>
+            <h2 ref={headingRef} tabIndex={-1}>{lesson.title}</h2>
           </div>
+          <div className="learning__badge">{completed ? <><CheckCircle2 size={14} /> Completed</> : <><MousePointer2 size={14} /> Hands-on lesson</>}</div>
+        </div>
 
-          <div className="learning__mobile-mission"><Workflow size={17} /><div><strong>Your mission</strong><p>{lesson.mission}</p></div></div>
           <div className="learning__lab-grid">
             <div className="learning__canvas-column">
+              <div className="learning__task"><span>Your task</span><p>{lesson.mission}</p></div>
               <section className="learning__workspace" aria-label="Interactive architecture builder">
                 <div className="learning__workspace-bar">
-                  <span className="learning__workspace-title"><Workflow size={16} /> Your architecture <span className="learning__workspace-count">{graph.nodes.length} nodes · {graph.edges.length} links</span></span>
+                  <span className="learning__workspace-title"><Workflow size={16} /> Architecture <span className="learning__workspace-count">{graph.nodes.length} nodes · {graph.edges.length} links</span></span>
+                  <span className="learning__scroll-note">Scroll canvas to explore <ArrowRight size={12} /></span>
                   <button type="button" className="learning__reset-button" onClick={() => setResetting(true)} aria-label="Reset lesson"><RotateCcw size={14} /><span>Reset</span></button>
                 </div>
                 {resetting && <div className="learning__reset" role="alert"><span>Reset this lesson’s diagram and completion? Other lessons stay saved.</span><button type="button" onClick={() => { updateGraph(starterFor(lesson)); setSource(null); setInspected('user'); setResetting(false) }}>Reset diagram</button><button type="button" onClick={() => setResetting(false)}>Cancel</button></div>}
                 <div className="learning__canvas-scroll">
                   <div className={`learning__canvas ${source ? 'has-source' : ''}`} onKeyDown={e => { if (e.key === 'Escape') setSource(null) }}>
                     <div className="learning__canvas-caption"><span className="learning__live-dot" />{source ? `FROM ${COMPONENTS[source].name.toUpperCase()} → CHOOSE A TARGET` : 'CLICK A SOURCE, THEN A DESTINATION'}</div>
-                    <svg className="learning__wires" viewBox="0 0 1000 530" aria-hidden="true">
+                    <svg className="learning__wires" viewBox="0 0 1000 530" preserveAspectRatio="none" aria-hidden="true">
                       <defs><marker id="learning-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" /></marker></defs>
                       {graph.edges.map(connection => {
                         const a = componentPosition(connection.source, lessonIndex === 0)
@@ -199,7 +192,7 @@ export function LearningPage() {
                   </div>
                 </div>
                 <div className="learning__tray" aria-label="Component tray">
-                  <div className="learning__tray-heading"><span>COMPONENT LIBRARY</span><small>Add to canvas</small></div>
+                  <div className="learning__tray-heading"><span>Components</span><small>Click to add or remove</small></div>
                   <div className="learning__tray-items">
                     {lesson.nodes.filter(id => id !== 'user').map(id => {
                       const Icon = COMPONENT_ICONS[id]
@@ -208,10 +201,10 @@ export function LearningPage() {
                     })}
                   </div>
                 </div>
-                <div className="learning__run-bar"><span><span className="learning__live-dot" />{completed ? 'Architecture complete' : 'Your canvas, your decisions.'}</span><button type="button" className="learning__primary" onClick={runArchitecture}><Play size={14} fill="currentColor" /> Check & run <span className="learning__button-arrow">↗</span></button></div>
+                <div className="learning__run-bar"><span><span className="learning__live-dot" />{completed ? 'Architecture complete' : 'Connect, check, then follow the request.'}</span><button type="button" className="learning__primary" onClick={runArchitecture}><Play size={14} fill="currentColor" /> Check & run <span className="learning__button-arrow">↗</span></button></div>
               </section>
 
-              <div className="learning__inspector"><span className="learning__inspector-icon" data-kind={inspected}><InspectedIcon size={20} /></span><div><span className="learning__eyebrow">UNDER THE HOOD · {COMPONENTS[inspected].name}</span><p>{COMPONENTS[inspected].description}</p></div></div>
+              <div className="learning__inspector"><span className="learning__inspector-icon" data-kind={inspected}><InspectedIcon size={20} /></span><div><span className="learning__eyebrow">ABOUT {COMPONENTS[inspected].name}</span><p>{COMPONENTS[inspected].description}</p></div></div>
               <details className="learning__connections"><summary><Link2 size={14} /> Connections <span>{graph.edges.length}</span><small>Edit wiring</small></summary><p>Arrows show a call or dependency; its response is implicit. Remove a connection to rewire it.</p><div>{graph.edges.length ? graph.edges.map(connection => <button key={connectionId(connection)} type="button" aria-label={`Remove connection ${COMPONENTS[connection.source].name} to ${COMPONENTS[connection.target].name}`} onClick={() => { updateGraph({ ...graph, edges: graph.edges.filter(e => connectionId(e) !== connectionId(connection)) }); setSource(null) }}>{COMPONENTS[connection.source].name}<ArrowRight size={11} />{COMPONENTS[connection.target].name}<X size={12} /></button>) : <small>No connections yet. Choose two cards to create one.</small>}</div></details>
 
               {event ? (
@@ -228,26 +221,24 @@ export function LearningPage() {
             </div>
 
             <aside className="learning__brief" aria-label="Lesson brief">
-              <div className="learning__brief-header"><span>THE BRIEF</span><span>LAB {String(lessonIndex + 1).padStart(2, '0')}</span></div>
-              <section className="learning__mission" aria-labelledby="mission-title"><div className="learning__mission-heading"><span className="learning__mission-mark"><Workflow size={18} /></span><h3 id="mission-title">Your mission</h3></div><p>{lesson.mission}</p></section>
-              <div className="learning__concept"><span className="learning__eyebrow">THE CONCEPT</span><p>{lesson.concept}</p></div>
+              <div className="learning__concept"><h3>Why this matters</h3><p>{lesson.concept}</p></div>
               <section className={`learning__checks ${checked && !passed ? 'has-errors' : ''}`} aria-label="Architecture checks">
                 <div className="learning__check-heading"><h3>{checked ? passed ? 'Ready to run' : 'Keep connecting' : 'Design checklist'}</h3><span>{checks.filter(c => c.passed).length}/{checks.length}</span></div>
                 {checks.map(check => <p key={check.label} className={check.passed ? 'is-passed' : checked ? 'is-missing' : 'is-pending'}>{check.passed ? <CheckCircle2 size={14} /> : <CircleDashed size={14} />}{check.label}</p>)}
                 {checked && <small>Checks match this exercise’s teaching architecture, not every valid system design.</small>}
               </section>
-              <button type="button" className="learning__hint-button" aria-expanded={showHint} onClick={() => setShowHint(!showHint)}><Lightbulb size={15} /><span>{showHint ? 'Hide the hint' : 'A little nudge?'}</span><Plus size={13} /></button>
+              <button type="button" className="learning__hint-button" aria-expanded={showHint} onClick={() => setShowHint(!showHint)}><Lightbulb size={15} /><span>{showHint ? 'Hide hint' : 'Show a hint'}</span><ChevronRight size={13} /></button>
               {showHint && <p className="learning__hint">{lesson.hint}</p>}
               <footer className="learning__footer">
                 {lessonIndex < LESSONS.length - 1 ? <button type="button" className="learning__next" disabled={!completed} onClick={() => selectLesson(lessonIndex + 1)}>Next lesson <ArrowRight size={15} /></button> : <Link to="/" className="learning__next">Back to ArchBoard <ArrowRight size={15} /></Link>}
                 <button type="button" className="learning__text-button" disabled={lessonIndex === 0} onClick={() => selectLesson(lessonIndex - 1)}><ArrowLeft size={13} /> Previous lesson</button>
               </footer>
-              <p className="learning__brief-note"><ShieldCheck size={13} />A local learning sandbox. No real agents, API calls, or external actions.</p>
+              <p className="learning__brief-note"><ShieldCheck size={13} />Simulated locally. No API calls or real-world actions.</p>
+              <p className="learning__save-note">{storageFailed ? 'Storage unavailable. Progress lasts for this visit.' : 'Progress saved on this device.'}</p>
             </aside>
           </div>
           <div className="learning__sr-only" role="status" aria-live="polite">{announcement}</div>
-        </main>
-      </div>
+      </main>
     </div>
   )
 }
