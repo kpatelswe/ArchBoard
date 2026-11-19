@@ -30,17 +30,12 @@ import {
 import type { BoardEvent, Peer } from '../lib/useBoardSocket'
 import { RemoteCursors } from './RemoteCursors'
 import { CATALOG, type NodeKind } from './catalog'
+import { createCanvasNode, duplicateNodes } from './canvasActions'
 import { nodeTypes } from './nodeTypes'
 import { Palette } from './Palette'
 import { BoardDocContext, EditingContext, EmitContext, type EditingMap } from './SyncContext'
 
-const nextNodeId = () => crypto.randomUUID()
 const POSITION_SEND_MS = 40
-
-/** Annotations render as their own node type; components share one. */
-function reactFlowTypeFor(kind: NodeKind) {
-  return CATALOG[kind].category === 'annotation' ? kind : 'architecture'
-}
 
 type CanvasProps = {
   doc: Y.Doc | null
@@ -68,7 +63,9 @@ function Canvas({
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
   const [remoteEditing, setRemoteEditing] = useState<EditingMap>({})
   const editingExpiry = useRef(new Map<string, number>())
-  const { screenToFlowPosition } = useReactFlow()
+  const { screenToFlowPosition, getNodes } = useReactFlow()
+  const surfaceRef = useRef<HTMLDivElement>(null)
+  const [showShortcuts, setShowShortcuts] = useState(false)
   const lastPositionSend = useRef(new Map<string, number>())
   const lastCursorSend = useRef(0)
 
@@ -222,6 +219,15 @@ function Canvas({
     [setEdges, writable],
   )
 
+  const addNode = useCallback((kind: NodeKind, position?: { x: number; y: number }) => {
+    if (!writable || !surfaceRef.current) return
+    const bounds = surfaceRef.current.getBoundingClientRect()
+    const point = position ?? screenToFlowPosition({ x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 })
+    const node = createCanvasNode(kind, point)
+    setNodes((current) => current.concat(node))
+    upsertNode(writable, node)
+  }, [screenToFlowPosition, setNodes, writable])
+
   const onDrop = useCallback(
     (event: React.DragEvent) => {
       event.preventDefault()
@@ -237,22 +243,9 @@ function Canvas({
         x: event.clientX,
         y: event.clientY,
       })
-      const node: Node = {
-        id: nextNodeId(),
-        type: reactFlowTypeFor(kind),
-        position,
-        // Annotations start empty so the placeholder invites typing;
-        // components start with their type name as a sensible default.
-        data: {
-          kind,
-          label:
-            CATALOG[kind].category === 'annotation' ? '' : CATALOG[kind].label,
-        },
-      }
-      setNodes((current) => current.concat(node))
-      if (writable) upsertNode(writable, node)
+      addNode(kind, position)
     },
-    [screenToFlowPosition, setNodes, writable],
+    [screenToFlowPosition, addNode, writable],
   )
 
   const emit = useCallback(
@@ -266,10 +259,26 @@ function Canvas({
     <BoardDocContext.Provider value={writable}>
       <EmitContext.Provider value={emit}>
       <EditingContext.Provider value={remoteEditing}>
-      <div className="canvas">
-        {!readOnly && <Palette />}
+      <div className="canvas" onKeyDown={(event) => {
+        if ((event.target as HTMLElement).closest('input, textarea, select, [contenteditable="true"]')) return
+        if (event.key === '?') {
+          event.preventDefault()
+          setShowShortcuts((current) => !current)
+        }
+        if (event.key === 'Escape') setShowShortcuts(false)
+        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'd') {
+          event.preventDefault()
+          if (!writable) return
+          const copies = duplicateNodes(writable, getNodes())
+          if (copies.length) setNodes((current) => [...current.map((node) => ({ ...node, selected: false })), ...copies])
+        }
+      }}>
+        {!readOnly && <Palette onAdd={addNode} disabled={!writable} />}
         <div
           className="canvas__surface"
+          ref={surfaceRef}
+          tabIndex={0}
+          aria-label="System design canvas"
           onPointerMove={onPointerMove}
           onDrop={onDrop}
           onDragOver={(event) => {
@@ -287,15 +296,11 @@ function Canvas({
                   )
                 : nodes
             }
-            edges={
-              highlightEdges.length
-                ? edges.map((edge) =>
-                    highlightEdges.includes(edge.id)
-                      ? { ...edge, className: 'is-flagged' }
-                      : edge,
-                  )
-                : edges
-            }
+            edges={edges.map((edge) => ({
+              ...edge,
+              className: highlightEdges.includes(edge.id) ? 'is-flagged' : undefined,
+              markerEnd: { type: MarkerType.ArrowClosed, width: 20, height: 20, color: highlightEdges.includes(edge.id) ? '#c92a2a' : '#87978f' },
+            }))}
             onNodesChange={handleNodesChange}
             onEdgesChange={handleEdgesChange}
             onConnect={onConnect}
@@ -309,9 +314,31 @@ function Canvas({
           >
             <Background gap={16} />
             <Controls showInteractive={!readOnly} />
-            <MiniMap pannable zoomable />
+            <MiniMap pannable zoomable style={{ width: 140, height: 90 }} />
             {subscribe && <RemoteCursors subscribe={subscribe} peers={peers} />}
           </ReactFlow>
+          {writable && nodes.length === 0 && (
+            <div className="canvas__onboarding">
+              <span className="canvas__eyebrow">YOUR NEXT BIG IDEA STARTS HERE</span>
+              <h2>Give your system a shape.</h2>
+              <p>Drag a component onto the canvas,<br />or click one in the library to start.</p>
+              <div className="canvas__steps"><span>01 Add components</span><span>02 Connect the dots</span><span>03 Explore the tradeoffs</span></div>
+            </div>
+          )}
+          <div className="canvas__help">
+            {showShortcuts && <div className="shortcuts" id="canvas-shortcuts" role="region" aria-label="Keyboard shortcuts">
+              <h2>At your fingertips</h2>
+              <p><span>Pan the canvas</span><kbd>Drag background</kbd></p>
+              <p><span>Zoom in / out</span><kbd>Scroll / pinch</kbd></p>
+              {!readOnly && <>
+                <p><span>Duplicate selected</span><kbd>⌘ / Ctrl + D</kbd></p>
+                <p><span>Remove selected</span><kbd>Delete / ⌫</kbd></p>
+                <p><span>Edit a label</span><kbd>Double-click</kbd></p>
+              </>}
+              <p><span>Toggle this guide</span><kbd>?</kbd></p>
+            </div>}
+            <button className="canvas__help-button" type="button" aria-label="Keyboard shortcuts" aria-expanded={showShortcuts} aria-controls="canvas-shortcuts" onClick={() => setShowShortcuts((current) => !current)}>?</button>
+          </div>
         </div>
       </div>
       </EditingContext.Provider>

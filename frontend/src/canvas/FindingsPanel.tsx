@@ -35,6 +35,8 @@ export function FindingsPanel({
   }
 
   const findings: Finding[] = analysis.findings
+  const counts = { error: 0, warning: 0, suggestion: 0 }
+  findings.forEach((finding) => counts[finding.severity]++)
 
   function toggle(finding: Finding) {
     const id = identity(finding)
@@ -44,8 +46,20 @@ export function FindingsPanel({
   return (
     <aside className="findings">
       <h2 className="findings__heading">Analysis</h2>
+      <p className="findings__subtitle">A second pair of eyes.</p>
+      <div className="findings__summary" aria-label="Finding counts">
+        {(['error', 'warning', 'suggestion'] as const).map((severity) => (
+          <span key={severity} className={`severity-chip severity-chip--${severity}`}>
+            <strong>{counts[severity]}</strong> {severity}{counts[severity] === 1 ? '' : 's'}
+          </span>
+        ))}
+      </div>
       {findings.length === 0 ? (
-        <p className="findings__empty">no findings — clean board</p>
+        <div className="findings__clear" role="status">
+          <span aria-hidden="true">✓</span>
+          <h3>Looking good.</h3>
+          <p>No structural issues spotted. Keep exploring — a great design is all about the tradeoffs.</p>
+        </div>
       ) : (
         findings.map((finding) => (
           <button
