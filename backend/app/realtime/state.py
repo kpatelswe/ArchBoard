@@ -42,6 +42,7 @@ class BoardState:
         # State vector of the doc as stored at `version`: what a newer stored
         # doc must contain for this replica's edits to merge into it safely.
         self._base_state = doc.get_state() if base_state is None else base_state
+        self._base_lineage = unsaved.lineage(doc)
         self._dirty = False
         self._superseded = False
         self._flush_task: asyncio.Task | None = None
@@ -52,20 +53,25 @@ class BoardState:
 
     @classmethod
     async def load(cls, board_id: uuid.UUID) -> "BoardState":
-        async with SessionLocal() as session:
-            board = await board_repository.get(session, board_id)
-        if board is None:
-            raise LookupError("board vanished")
+        # Journal first: every entry's base was saved before it was stashed,
+        # so the board read after it is never older than an entry's base.
         try:
             edits = await unsaved.entries(board_id)
         except Exception:
             logger.exception("could not read unsaved edits: %s", board_id)
             edits = []
+        async with SessionLocal() as session:
+            board = await board_repository.get(session, board_id)
+        if board is None:
+            raise LookupError("board vanished")
         recovered = [
             edit for edit in edits
             if unsaved.mergeable(edit, version=board.version, ydoc_state=board.ydoc_state)
         ]
-        superseded = [edit.key for edit in edits if edit not in recovered]
+        superseded = [
+            edit.key for edit in edits
+            if edit not in recovered and edit.base_version <= board.version
+        ]
 
         doc = Doc()
         nodes = doc.get("nodes", type=Map)
@@ -86,6 +92,7 @@ class BoardState:
                 nodes[node.id] = Map(node.model_dump(mode="json", exclude_none=True))
             for edge in snapshot.edges:
                 edges[edge.id] = Map(edge.model_dump(mode="json", exclude_none=True))
+            unsaved.mark_lineage(doc, board.version)
         state = cls(board_id, doc, board.version, base_state=base_state)
         for edit in recovered:
             doc.apply_update(edit.update)
@@ -178,6 +185,7 @@ class BoardState:
                 key,
                 base_version=self.version,
                 base_state=self._base_state,
+                base_lineage=self._base_lineage,
                 update=self.encoded_state(),
             )
         except Exception:
@@ -200,7 +208,7 @@ class BoardState:
 
     async def _persist(self, *, yield_to_rest: bool = False) -> None:
         async with SessionLocal() as session:
-            state_vector = self.doc.get_state()
+            state_vector, lineage = self.doc.get_state(), unsaved.lineage(self.doc)
             saved = await board_repository.update_snapshot(
                 session,
                 board_id=self.board_id,
@@ -210,7 +218,7 @@ class BoardState:
             )
             if saved is not None:
                 self.version = saved.version
-                self._base_state = state_vector
+                self._base_state, self._base_lineage = state_vector, lineage
                 return
             # Another writer bumped the version (a REST save, or another
             # process's flush). Merge their document into ours — CRDT merge
@@ -219,7 +227,9 @@ class BoardState:
             board = await board_repository.get(session, self.board_id)
             if board is None:
                 return
-            if yield_to_rest and not unsaved.descends(board.ydoc_state, self._base_state):
+            if yield_to_rest and not unsaved.descends(
+                board.ydoc_state, self._base_state, self._base_lineage
+            ):
                 # A REST save replaced the board (and cleared its CRDT
                 # history) after this doc was loaded, possibly re-seeded by a
                 # session since. With nobody connected, that newer explicit
@@ -229,7 +239,7 @@ class BoardState:
                 return
             if board.ydoc_state:
                 self.doc.apply_update(board.ydoc_state)
-            state_vector = self.doc.get_state()
+            state_vector, lineage = self.doc.get_state(), unsaved.lineage(self.doc)
             saved = await board_repository.update_snapshot(
                 session,
                 board_id=self.board_id,
@@ -239,7 +249,7 @@ class BoardState:
             )
             if saved is not None:
                 self.version = saved.version
-                self._base_state = state_vector
+                self._base_state, self._base_lineage = state_vector, lineage
             else:
                 self._dirty = True  # lost twice; the next update retries
 

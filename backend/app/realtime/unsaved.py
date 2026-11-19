@@ -12,11 +12,12 @@ import json
 import uuid
 from dataclasses import dataclass
 
-from pycrdt import Doc
+from pycrdt import Doc, Map
 
 from app.realtime.redis_client import get_redis as _client
 
 _PREFIX = "board-unsaved"
+_LINEAGE = "lineage"
 
 
 @dataclass(frozen=True)
@@ -24,6 +25,7 @@ class UnsavedEdit:
     key: str
     base_version: int
     base_state: bytes
+    base_lineage: int | None
     update: bytes
 
 
@@ -35,10 +37,13 @@ def _encode(value: bytes) -> str:
     return base64.b64encode(value).decode("ascii")
 
 
-async def stash(key: str, *, base_version: int, base_state: bytes, update: bytes) -> None:
+async def stash(
+    key: str, *, base_version: int, base_state: bytes, base_lineage: int | None, update: bytes
+) -> None:
     await _client().set(key, json.dumps({
         "base_version": base_version,
         "base_state": _encode(base_state),
+        "base_lineage": base_lineage,
         "update": _encode(update),
     }))
 
@@ -57,6 +62,7 @@ async def entries(board_id: uuid.UUID) -> list[UnsavedEdit]:
             key=key,
             base_version=value["base_version"],
             base_state=base64.b64decode(value["base_state"]),
+            base_lineage=value.get("base_lineage"),
             update=base64.b64decode(value["update"]),
         ))
     return found
@@ -95,21 +101,35 @@ def decode_state_vector(state: bytes) -> dict[int, int]:
     return clocks
 
 
-def descends(stored_update: bytes | None, base_state: bytes) -> bool:
-    """Whether a stored doc contains everything in the base state vector.
+def mark_lineage(doc: Doc, version: int) -> None:
+    """Record which saved JSON snapshot a freshly seeded doc came from."""
+    doc.get(_LINEAGE, type=Map)["seeded_from"] = version
 
-    CRDT saves only ever grow a stored doc, so it descends from every doc it
-    was saved over. A REST save clears the doc (None) and the next session
-    re-seeds a fresh one with new client ids, which breaks the chain.
+
+def lineage(doc: Doc) -> int | None:
+    return doc.get(_LINEAGE, type=Map).get("seeded_from")
+
+
+def descends(stored_update: bytes | None, base_state: bytes, base_lineage: int | None) -> bool:
+    """Whether a stored doc is the base doc's lineage, grown by CRDT saves.
+
+    A REST save clears the stored doc (None); the next session seeds a fresh
+    doc from it, marked with that save's version. Workers seeding the same
+    snapshot share the mark, so their saves still merge. Docs from before the
+    mark fall back to state vectors: CRDT saves only ever grow a stored doc,
+    while a re-seed brings new client ids.
     """
     if not stored_update:
         return False
     doc = Doc()
     doc.apply_update(stored_update)
+    stored_lineage = lineage(doc)
+    if base_lineage is not None or stored_lineage is not None:
+        return stored_lineage == base_lineage
     stored = decode_state_vector(doc.get_state())
     return all(stored.get(client, 0) >= clock for client, clock in decode_state_vector(base_state).items())
 
 
 def mergeable(edit: UnsavedEdit, *, version: int, ydoc_state: bytes | None) -> bool:
     """An edit may be merged into the board as stored now without overwriting it."""
-    return version == edit.base_version or descends(ydoc_state, edit.base_state)
+    return version == edit.base_version or descends(ydoc_state, edit.base_state, edit.base_lineage)

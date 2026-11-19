@@ -9,7 +9,7 @@ from pycrdt import Doc, Map
 from app.analysis.graph import BoardGraph
 from app.analysis.rules import deep_sync_chain
 from app.models.membership import BoardRole
-from app.realtime import rate_limit
+from app.realtime import rate_limit, unsaved
 from app.realtime.manager import BoardConnection, ConnectionManager
 from app.realtime.state import BoardState, BoardStateRegistry
 from app.schemas.snapshot import BoardSnapshot
@@ -434,3 +434,56 @@ async def test_stranded_edit_never_overwrites_newer_rest_save(monkeypatch, fake_
     await BoardStateRegistry().recover_unsaved()
     save.assert_not_awaited()
     assert not fake_redis.data
+
+
+async def test_independent_seeds_merge_stranded_edit(monkeypatch, fake_redis):
+    """Two workers seed the same JSON snapshot; one saves while the other's edit is stranded."""
+    mock_session(monkeypatch)
+    board_id = uuid.uuid4()
+    monkeypatch.setattr('app.realtime.state.board_repository.get',
+                        AsyncMock(return_value=stored_board(0, None, node_snapshot('old'))))
+    stranded = BoardStateRegistry()
+    state = await stranded.acquire(board_id)
+    state.doc.get('nodes', type=Map)['a'] = Map({**node_snapshot('stranded')['nodes'][0], 'id': 'a'})
+    state._dirty = True
+    monkeypatch.setattr('app.realtime.state.board_repository.update_snapshot', AsyncMock(side_effect=OSError('db down')))
+    with pytest.raises(OSError):
+        await stranded.release(board_id, lambda: 0)
+    stranded._retries[board_id][1].cancel()  # worker restart
+
+    other = await BoardState.load(board_id)
+    other.doc.get('nodes', type=Map)['b'] = Map({**node_snapshot('saved elsewhere')['nodes'][0], 'id': 'b'})
+    monkeypatch.setattr('app.realtime.state.board_repository.get',
+                        AsyncMock(return_value=stored_board(1, other.doc, node_snapshot('old'))))
+    save = AsyncMock(return_value=SimpleNamespace(version=2))
+    monkeypatch.setattr('app.realtime.state.board_repository.update_snapshot', save)
+    await BoardStateRegistry().recover_unsaved()
+    save.assert_awaited_once()
+    snapshot = save.call_args.kwargs['snapshot']
+    assert save.call_args.kwargs['expected_version'] == 1
+    assert label_of(snapshot, 'a') == 'stranded' and label_of(snapshot, 'b') == 'saved elsewhere'
+    assert not fake_redis.data
+
+
+async def test_stale_board_read_keeps_newer_journal_entry(monkeypatch, fake_redis):
+    mock_session(monkeypatch)
+    board_id = uuid.uuid4()
+    base = seeded_doc('old')
+    await unsaved.stash(unsaved.key_for(board_id, 'x'), base_version=5, base_state=base.get_state(),
+                        base_lineage=None, update=base.get_update())
+    monkeypatch.setattr('app.realtime.state.board_repository.get', AsyncMock(return_value=stored_board(4, None)))
+    state = await BoardState.load(board_id)
+    assert not state._dirty
+    assert fake_redis.data
+
+
+async def test_restash_uses_fresh_journal_key(monkeypatch, fake_redis):
+    mock_session(monkeypatch)
+    monkeypatch.setattr('app.realtime.state.board_repository.get', AsyncMock(return_value=stored_board(0, seeded_doc('old'))))
+    state = await BoardState.load(uuid.uuid4())
+    state._dirty = True
+    await state.stash_unsaved()
+    first = set(fake_redis.data)
+    await unsaved.discard(*first)  # a recovering worker clears what it read
+    await state.stash_unsaved()
+    assert fake_redis.data and not set(fake_redis.data) & first
