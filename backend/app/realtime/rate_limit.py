@@ -18,14 +18,16 @@ import uuid
 from app.realtime.redis_client import get_redis
 
 WINDOW_SECONDS = 10
-MAX_EVENTS_PER_WINDOW = 400  # two tabs dragging + cursors is ~250; floods are 1000s
+MAX_EVENTS_PER_WINDOW = 400
+MAX_UPDATES_PER_WINDOW = 2000
 ABUSE_MULTIPLIER = 5  # this far past the limit means a flood, not a human
 
 
-async def register_event(user_id: uuid.UUID, board_id: uuid.UUID) -> int:
+async def register_event(user_id: uuid.UUID, board_id: uuid.UUID, *, document: bool = False) -> int:
     """Count one inbound event; returns the running total for this window."""
     window = int(time.time()) // WINDOW_SECONDS
-    key = f"rate:{board_id}:{user_id}:{window}"
+    channel = 'document' if document else 'awareness'
+    key = f"rate:{board_id}:{user_id}:{channel}:{window}"
     client = get_redis()
     count = await client.incr(key)
     if count == 1:
@@ -34,7 +36,9 @@ async def register_event(user_id: uuid.UUID, board_id: uuid.UUID) -> int:
     return count
 
 
-def verdict(count: int) -> str:
+def verdict(count: int, *, document: bool = False) -> str:
+    if document:
+        return 'allow' if count <= MAX_UPDATES_PER_WINDOW else 'disconnect'
     if count <= MAX_EVENTS_PER_WINDOW:
         return "allow"
     if count > MAX_EVENTS_PER_WINDOW * ABUSE_MULTIPLIER:

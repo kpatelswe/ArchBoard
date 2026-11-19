@@ -43,9 +43,9 @@ export function EditableLabel({
 
   function commit() {
     setEditing(false)
+    if (!doc || !getNode(id)) return
     updateNodeData(id, { label: draft })
-    const data = getNode(id)?.data
-    if (data && doc) setNodeFields(doc, id, { data: { ...data, label: draft } })
+    setNodeFields(doc, id, { 'data:label': draft })
   }
 
   if (!editing) {
@@ -53,6 +53,7 @@ export function EditableLabel({
       <span
         className="editable"
         onDoubleClick={() => {
+          if (!doc) return
           setDraft(value)
           setEditing(true)
         }}

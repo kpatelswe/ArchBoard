@@ -14,6 +14,7 @@ the one concurrency problem CRDTs genuinely erase.
 """
 
 import asyncio
+import contextlib
 import uuid
 
 from pycrdt import Doc, Map
@@ -76,6 +77,19 @@ class BoardState:
             "nodes": list(self.doc.get("nodes", type=Map).to_py().values()),
             "edges": list(self.doc.get("edges", type=Map).to_py().values()),
         }
+        for node in raw['nodes']:
+            data = dict(node.get('data', {}))
+            if 'data:label' in node:
+                data['label'] = node.pop('data:label')
+            if 'data:technology' in node:
+                metadata = dict(data.get('metadata', {}))
+                technology = node.pop('data:technology')
+                if technology:
+                    metadata['technology'] = technology
+                else:
+                    metadata.pop('technology', None)
+                data['metadata'] = metadata
+            node['data'] = data
         try:
             return BoardSnapshot.model_validate(raw).model_dump(mode="json")
         except ValidationError:
@@ -105,6 +119,13 @@ class BoardState:
         if not self._dirty:
             return
         self._dirty = False
+        try:
+            await self._persist()
+        except BaseException:
+            self._dirty = True
+            raise
+
+    async def _persist(self) -> None:
         async with SessionLocal() as session:
             saved = await board_repository.update_snapshot(
                 session,
@@ -161,11 +182,16 @@ class BoardStateRegistry:
     async def release(self, board_id: uuid.UUID, remaining_connections: int) -> None:
         if remaining_connections > 0:
             return
-        state = self._states.pop(board_id, None)
-        if state is not None:
-            if state._flush_task is not None:
-                state._flush_task.cancel()
-            await state.flush()  # last one out turns off the lights, durably
+        async with self._load_lock:
+            state = self._states.get(board_id)
+            if state is not None:
+                if state._flush_task is not None:
+                    state._flush_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError, Exception):
+                        await state._flush_task
+                await state.flush()  # last one out turns off the lights, durably
+                if not state._dirty:
+                    self._states.pop(board_id, None)
 
 
 registry = BoardStateRegistry()

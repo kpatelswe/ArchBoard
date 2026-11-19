@@ -201,7 +201,8 @@ function Canvas({
   )
 
   const onConnect = useCallback(
-    (connection: Connection) =>
+    (connection: Connection) => {
+      if (!writable) return
       setEdges((current) => {
         const next = addEdge(
           {
@@ -216,13 +217,15 @@ function Canvas({
         )
         if (created && writable) upsertEdge(writable, created)
         return next
-      }),
+      })
+    },
     [setEdges, writable],
   )
 
   const onDrop = useCallback(
     (event: React.DragEvent) => {
       event.preventDefault()
+      if (!writable) return
       const kind = event.dataTransfer.getData(
         'application/archboard-kind',
       ) as NodeKind
@@ -305,7 +308,7 @@ function Canvas({
             proOptions={{ hideAttribution: false }}
           >
             <Background gap={16} />
-            <Controls />
+            <Controls showInteractive={!readOnly} />
             <MiniMap pannable zoomable />
             {subscribe && <RemoteCursors subscribe={subscribe} peers={peers} />}
           </ReactFlow>

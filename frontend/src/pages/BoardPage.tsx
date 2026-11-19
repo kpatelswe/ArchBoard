@@ -1,5 +1,5 @@
 import { useAuth } from '@clerk/react'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { BoardCanvas } from '../canvas/BoardCanvas'
 import { FindingsPanel } from '../canvas/FindingsPanel'
@@ -20,12 +20,16 @@ export function BoardPage() {
   const [board, setBoard] = useState<Board | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [shareMessage, setShareMessage] = useState<string | null>(null)
+  const [shareLink, setShareLink] = useState<string | null>(null)
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null)
   const [highlight, setHighlight] = useState<{ nodes: string[]; edges: string[] }>({
     nodes: [],
     edges: [],
   })
   const socket = useBoardSocket(boardId)
+  const onHighlight = useCallback((nodes: string[], edges: string[]) => {
+    setHighlight({ nodes, edges })
+  }, [])
   const socketLive = socket.state === 'live'
 
   // The linter runs like an editor's: re-analyze ~1.5s after the last board
@@ -75,11 +79,20 @@ export function BoardPage() {
 
   async function onShare(role: 'editor' | 'viewer') {
     if (!boardId) return
-    const invite = await createInvite(await getToken(), boardId, role)
-    const url = `${window.location.origin}/invite/${invite.token}`
-    await navigator.clipboard.writeText(url)
-    setShareMessage(`${role} link copied`)
-    setTimeout(() => setShareMessage(null), 2500)
+    setShareLink(null)
+    try {
+      const invite = await createInvite(await getToken(), boardId, role)
+      const url = `${window.location.origin}/invite/${invite.token}`
+      try {
+        await navigator.clipboard.writeText(url)
+        setShareMessage(`${role} link copied`)
+      } catch {
+        setShareLink(url)
+        setShareMessage('Copy failed — copy the link below.')
+      }
+    } catch {
+      setShareMessage('Could not create invite. Please try again.')
+    }
   }
 
   if (error) return <p className="status status--unreachable">{error}</p>
@@ -134,28 +147,26 @@ export function BoardPage() {
           </span>
           {board.role === 'owner' && (
             <span className="board__share">
-              {shareMessage ?? (
-                <>
-                  <button
-                    className="btn btn--small"
-                    type="button"
-                    onClick={() => onShare('viewer')}
-                  >
-                    Share view
-                  </button>
-                  <button
-                    className="btn btn--small btn--primary"
-                    type="button"
-                    onClick={() => onShare('editor')}
-                  >
-                    Share edit
-                  </button>
-                </>
-              )}
+              <button
+                className="btn btn--small"
+                type="button"
+                onClick={() => onShare('viewer')}
+              >
+                Share view
+              </button>
+              <button
+                className="btn btn--small btn--primary"
+                type="button"
+                onClick={() => onShare('editor')}
+              >
+                Share edit
+              </button>
             </span>
           )}
         </div>
       </div>
+      {shareMessage && <p className="notice" role="status">{shareMessage}</p>}
+      {shareLink && <input className="input" aria-label="Invite link" value={shareLink} readOnly onFocus={(event) => event.target.select()} />}
       <div className="board__body">
         <BoardCanvas
           doc={socket.doc}
@@ -169,7 +180,7 @@ export function BoardPage() {
         />
         <FindingsPanel
           analysis={analysis}
-          onHighlight={(nodes, edges) => setHighlight({ nodes, edges })}
+          onHighlight={onHighlight}
         />
       </div>
     </section>

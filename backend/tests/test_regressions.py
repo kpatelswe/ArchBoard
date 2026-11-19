@@ -1,0 +1,194 @@
+import asyncio
+import uuid
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+from pycrdt import Doc, Map
+
+from app.analysis.graph import BoardGraph
+from app.analysis.rules import deep_sync_chain
+from app.models.membership import BoardRole
+from app.realtime import rate_limit
+from app.realtime.manager import BoardConnection, ConnectionManager
+from app.realtime.state import BoardState, BoardStateRegistry
+from app.schemas.snapshot import BoardSnapshot
+from app.websocket import routes
+
+
+def state_with_node():
+    doc = Doc()
+    doc.get('nodes', type=Map)['n'] = Map({
+        'id': 'n', 'type': 'architecture', 'position': {'x': 0, 'y': 0},
+        'data': {'kind': 'service', 'label': 'old', 'metadata': {'technology': 'Go'}},
+    })
+    return BoardState(uuid.uuid4(), doc, 0)
+
+
+def mock_session(monkeypatch):
+    session = MagicMock()
+    session.__aenter__ = AsyncMock(return_value=session)
+    session.__aexit__ = AsyncMock(return_value=False)
+    monkeypatch.setattr('app.realtime.state.SessionLocal', lambda: session)
+    return session
+
+
+async def test_flush_failure_retries_on_release(monkeypatch):
+    mock_session(monkeypatch)
+    save = AsyncMock(side_effect=[OSError('offline'), SimpleNamespace(version=1)])
+    monkeypatch.setattr('app.realtime.state.board_repository.update_snapshot', save)
+    state = state_with_node()
+    state._dirty = True
+    registry = BoardStateRegistry()
+    registry._states[state.board_id] = state
+    with pytest.raises(OSError, match='offline'):
+        await state.flush()
+    assert state._dirty
+    await registry.release(state.board_id, 0)
+    assert save.await_count == 2
+    assert not state._dirty
+    assert registry.peek(state.board_id) is None
+
+
+async def test_failed_release_retains_state(monkeypatch):
+    mock_session(monkeypatch)
+    monkeypatch.setattr('app.realtime.state.board_repository.update_snapshot', AsyncMock(side_effect=OSError))
+    state = state_with_node()
+    state._dirty = True
+    registry = BoardStateRegistry()
+    registry._states[state.board_id] = state
+    with pytest.raises(OSError):
+        await registry.release(state.board_id, 0)
+    assert registry.peek(state.board_id) is state
+    assert state._dirty
+
+
+async def test_clean_flush_does_not_open_session(monkeypatch):
+    factory = MagicMock(side_effect=AssertionError('unexpected session'))
+    monkeypatch.setattr('app.realtime.state.SessionLocal', factory)
+    await BoardState(uuid.uuid4(), Doc(), 0).flush()
+    factory.assert_not_called()
+
+
+async def test_cancelled_flush_is_dirty(monkeypatch):
+    mock_session(monkeypatch)
+    monkeypatch.setattr('app.realtime.state.board_repository.update_snapshot', AsyncMock(side_effect=asyncio.CancelledError))
+    state = state_with_node()
+    state._dirty = True
+    with pytest.raises(asyncio.CancelledError):
+        await state.flush()
+    assert state._dirty
+
+
+def test_materialize_legacy_and_field_edits():
+    state = state_with_node()
+    assert state.to_snapshot()['nodes'][0]['data']['label'] == 'old'
+    node = state.doc.get('nodes', type=Map)['n']
+    node['data:label'] = 'new'
+    node['data:technology'] = 'FastAPI'
+    snapshot = BoardSnapshot.model_validate(state.to_snapshot())
+    assert snapshot.nodes[0].data.label == 'new'
+    assert snapshot.nodes[0].data.metadata['technology'] == 'FastAPI'
+    restored = Doc()
+    restored.apply_update(state.encoded_state())
+    assert BoardState(state.board_id, restored, 0).to_snapshot() == state.to_snapshot()
+    node['data:technology'] = None
+    assert state.to_snapshot()['nodes'][0]['data']['metadata'] == {}
+    assert BoardState(uuid.uuid4(), Doc(), 0).to_snapshot() == {'nodes': [], 'edges': []}
+
+
+@pytest.mark.parametrize('remaining_same_user', [True, False])
+async def test_presence_only_leaves_on_last_connection(monkeypatch, remaining_same_user):
+    manager = ConnectionManager()
+    board, user = uuid.uuid4(), uuid.uuid4()
+    first = BoardConnection(None, 'first', user, BoardRole.EDITOR)
+    other = BoardConnection(None, 'other', user if remaining_same_user else uuid.uuid4(), BoardRole.EDITOR)
+    manager.add(board, first)
+    manager.add(board, other)
+    monkeypatch.setattr(routes, 'manager', manager)
+    monkeypatch.setattr(routes.registry, 'release', AsyncMock())
+    clear, publish = AsyncMock(), AsyncMock()
+    monkeypatch.setattr(routes.presence, 'clear', clear)
+    monkeypatch.setattr(routes, '_publish', publish)
+    await routes._teardown(board, first)
+    assert clear.called is not remaining_same_user
+    assert publish.called is not remaining_same_user
+    await routes._teardown(board, other)
+    clear.assert_awaited_with(board, other.user_id)
+    assert publish.call_args.args[1]['type'] == 'board.left'
+
+
+def graph_for(pairs, *, asynchronous=()):
+    ids = sorted({node for pair in pairs for node in pair})
+    return BoardGraph.from_snapshot(BoardSnapshot.model_validate({
+        'nodes': [{'id': node, 'type': 'architecture', 'position': {'x': 0, 'y': 0},
+                   'data': {'kind': 'service', 'label': node}} for node in ids],
+        'edges': [{'id': a + b, 'source': a, 'target': b,
+                   'data': {'synchronous': (a, b) not in asynchronous}} for a, b in pairs],
+    }))
+
+
+@pytest.mark.parametrize('pairs,nodes,edges', [
+    ([('A', 'B'), ('B', 'C'), ('C', 'A'), ('A', 'C'), ('X', 'A'), ('C', 'Y')],
+     ['A', 'B', 'C'], ['AB', 'AC', 'BC', 'CA']),
+    ([('A', 'A')], ['A'], ['AA']),
+    ([('A', 'B'), ('B', 'A'), ('C', 'D'), ('D', 'C'), ('B', 'C')],
+     ['A', 'B', 'C', 'D'], ['AB', 'BA', 'CD', 'DC']),
+])
+def test_all_cycle_members_and_edges(pairs, nodes, edges):
+    finding, = deep_sync_chain(graph_for(pairs))
+    assert finding.node_ids == nodes
+    assert finding.edge_ids == edges
+
+
+def test_acyclic_empty_and_async_graphs():
+    assert deep_sync_chain(graph_for([])) == []
+    assert deep_sync_chain(graph_for([('A', 'B')])) == []
+    assert deep_sync_chain(graph_for([('A', 'B'), ('B', 'A')], asynchronous=[('B', 'A')])) == []
+
+
+async def test_rate_budgets_are_independent(monkeypatch):
+    counts = {}
+    async def incr(key):
+        counts[key] = counts.get(key, 0) + 1
+        return counts[key]
+    redis = SimpleNamespace(incr=incr, expire=AsyncMock())
+    monkeypatch.setattr(rate_limit, 'get_redis', lambda: redis)
+    monkeypatch.setattr(rate_limit.time, 'time', lambda: 100)
+    board, user = uuid.uuid4(), uuid.uuid4()
+    for _ in range(500):
+        awareness = await rate_limit.register_event(user, board)
+        updates = await rate_limit.register_event(user, board, document=True)
+        assert rate_limit.verdict(updates, document=True) == 'allow'
+    assert rate_limit.verdict(awareness) == 'drop'
+    assert rate_limit.verdict(0, document=True) == 'allow'
+    assert rate_limit.verdict(rate_limit.MAX_UPDATES_PER_WINDOW + 1, document=True) == 'disconnect'
+    assert rate_limit.verdict(2001) == 'disconnect'
+    assert len(counts) == 2
+
+
+@pytest.mark.parametrize('oversized', [False, True])
+async def test_rejected_document_closes_socket(monkeypatch, oversized):
+    board, user_id = uuid.uuid4(), uuid.uuid4()
+    user = SimpleNamespace(id=user_id, name='Test', avatar_url=None)
+    session = MagicMock()
+    session.__aenter__ = AsyncMock(return_value=session)
+    session.__aexit__ = AsyncMock(return_value=False)
+    monkeypatch.setattr(routes, 'SessionLocal', lambda: session)
+    monkeypatch.setattr(routes, 'verify_session_token', lambda token: 'clerk_user')
+    monkeypatch.setattr(routes.user_repository, 'get_by_clerk_id', AsyncMock(return_value=user))
+    monkeypatch.setattr(routes.membership_repository, 'get_role', AsyncMock(return_value=BoardRole.EDITOR))
+    monkeypatch.setattr(routes.presence, 'mark', AsyncMock())
+    monkeypatch.setattr(routes.presence, 'roster', AsyncMock(return_value=[]))
+    monkeypatch.setattr(routes.registry, 'acquire', AsyncMock(return_value=state_with_node()))
+    monkeypatch.setattr(routes, 'manager', ConnectionManager())
+    monkeypatch.setattr(routes.bus, 'subscribe', AsyncMock())
+    monkeypatch.setattr(routes, '_publish', AsyncMock())
+    monkeypatch.setattr(routes, '_teardown', AsyncMock())
+    monkeypatch.setattr(routes.rate_limit, 'register_event', AsyncMock(return_value=rate_limit.MAX_UPDATES_PER_WINDOW + 1))
+    socket = SimpleNamespace(
+        query_params={'token': 'test'}, accept=AsyncMock(), send_json=AsyncMock(), close=AsyncMock(),
+        receive=AsyncMock(return_value={'type': 'websocket.receive', 'bytes': b'x' * (routes.MAX_FRAME_BYTES + 1 if oversized else 1)}),
+    )
+    await routes.board_websocket(socket, board)
+    assert socket.close.call_args.args[0] == (4400 if oversized else routes.CLOSE_RATE_LIMITED)

@@ -1,7 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { AnalysisResult, Finding } from '../lib/api'
 
 const GLYPH = { error: '✕', warning: '!', suggestion: '~' } as const
+const identity = (finding: Finding) => JSON.stringify([
+  finding.rule, [...finding.node_ids].sort(), [...finding.edge_ids].sort(),
+])
 
 /** Linter output for the board. Clicking a finding highlights its nodes on
  *  the canvas; clicking again clears. Re-runs arrive debounced from above. */
@@ -12,7 +15,15 @@ export function FindingsPanel({
   analysis: AnalysisResult | null
   onHighlight: (nodeIds: string[], edgeIds: string[]) => void
 }) {
-  const [openIndex, setOpenIndex] = useState<number | null>(null)
+  const [selection, setSelection] = useState<{ id: string; analysis: AnalysisResult } | null>(null)
+  const selected = selection?.id
+  const active = analysis?.findings.find((finding) => identity(finding) === selected)
+  if (selection && analysis !== selection.analysis) {
+    setSelection(active && analysis ? { id: selection.id, analysis } : null)
+  }
+  useEffect(() => {
+    onHighlight(active?.node_ids ?? [], active?.edge_ids ?? [])
+  }, [active, onHighlight])
 
   if (!analysis) {
     return (
@@ -25,14 +36,9 @@ export function FindingsPanel({
 
   const findings: Finding[] = analysis.findings
 
-  function toggle(index: number, finding: Finding) {
-    if (openIndex === index) {
-      setOpenIndex(null)
-      onHighlight([], [])
-    } else {
-      setOpenIndex(index)
-      onHighlight(finding.node_ids, finding.edge_ids)
-    }
+  function toggle(finding: Finding) {
+    const id = identity(finding)
+    if (analysis) setSelection((current) => current?.id === id ? null : { id, analysis })
   }
 
   return (
@@ -41,21 +47,21 @@ export function FindingsPanel({
       {findings.length === 0 ? (
         <p className="findings__empty">no findings — clean board</p>
       ) : (
-        findings.map((finding, index) => (
+        findings.map((finding) => (
           <button
-            key={`${finding.rule}-${index}`}
+            key={identity(finding)}
             type="button"
             className={`finding finding--${finding.severity} ${
-              openIndex === index ? 'is-open' : ''
+              selected === identity(finding) ? 'is-open' : ''
             }`}
-            onClick={() => toggle(index, finding)}
+            onClick={() => toggle(finding)}
           >
             <span className="finding__head">
               <span className="finding__glyph">{GLYPH[finding.severity]}</span>
               <span className="finding__rule">{finding.rule}</span>
             </span>
             <span className="finding__message">{finding.message}</span>
-            {openIndex === index && (
+            {selected === identity(finding) && (
               <span className="finding__detail">
                 <span>{finding.why}</span>
                 <span>

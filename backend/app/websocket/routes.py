@@ -164,11 +164,11 @@ async def board_websocket(websocket: WebSocket, board_id: uuid.UUID) -> None:
                     "websocket frame too large: %d bytes user=%s board=%s",
                     frame_bytes, user_id, board_id,
                 )
-                await websocket.send_json(events.error_frame("frame too large"))
-                continue
+                await websocket.close(4400, "frame too large")
+                break
 
-            count = await rate_limit.register_event(user_id, board_id)
-            action = rate_limit.verdict(count)
+            count = await rate_limit.register_event(user_id, board_id, document=update is not None)
+            action = rate_limit.verdict(count, document=update is not None)
             if action == "disconnect":
                 # Sustained flooding: stop paying to read this socket at all.
                 logger.warning(
@@ -198,10 +198,8 @@ async def board_websocket(websocket: WebSocket, board_id: uuid.UUID) -> None:
                 try:
                     state.apply_update(update)
                 except Exception:
-                    await websocket.send_json(
-                        events.error_frame("malformed CRDT update")
-                    )
-                    continue
+                    await websocket.close(4400, "malformed CRDT update")
+                    break
                 state.schedule_flush()
                 await _publish(
                     board_id,
@@ -272,11 +270,12 @@ async def _teardown(board_id: uuid.UUID, connection: BoardConnection) -> None:
     await _attempt(
         "registry.release", registry.release(board_id, manager.count(board_id))
     )
-    await _attempt("presence.clear", presence.clear(board_id, connection.user_id))
-    await _attempt(
-        "publish board.left",
-        _publish(board_id, {"type": "board.left", "user_id": str(connection.user_id)}),
-    )
+    if manager.count(board_id, connection.user_id) == 0:
+        await _attempt("presence.clear", presence.clear(board_id, connection.user_id))
+        await _attempt(
+            "publish board.left",
+            _publish(board_id, {"type": "board.left", "user_id": str(connection.user_id)}),
+        )
 
 
 async def _attempt(what: str, step: Awaitable[None]) -> None:

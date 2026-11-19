@@ -61,39 +61,48 @@ export function useBoardSocket(boardId: string | undefined) {
     let attempt = 0
     let retryTimer: ReturnType<typeof setTimeout> | undefined
 
+    function retry() {
+      if (cancelled) return
+      setState('reconnecting')
+      const backoff = Math.min(MAX_BACKOFF_MS, 1_000 * 2 ** Math.min(attempt, 10))
+      attempt += 1
+      retryTimer = setTimeout(open, backoff * (0.5 + Math.random() / 2))
+    }
+
     async function open() {
       // Browser WebSockets cannot set headers; the short-lived (~60s) Clerk
       // token rides the query string and only authenticates the handshake.
       // getToken() is called fresh on every (re)connect for that reason.
-      const token = await getToken()
-      if (!token || cancelled) return
+      let token: string | null
+      try {
+        token = await getToken()
+      } catch {
+        retry()
+        return
+      }
+      if (cancelled) return
+      if (!token) {
+        retry()
+        return
+      }
       const socket = new WebSocket(
         `${WS_URL}/ws/boards/${boardId}?token=${token}`,
       )
       socket.binaryType = 'arraybuffer'
       socketRef.current = socket
 
-      socket.onopen = () => {
-        if (cancelled) return
-        attempt = 0
-        setState('live')
-      }
-
       socket.onclose = (event) => {
         if (cancelled) return
         socketRef.current = null
         // Forbidden is final — retrying a revoked membership just spams.
-        if (event.code === CLOSE_FORBIDDEN) {
+        if (event.code === CLOSE_FORBIDDEN || event.code === 4400) {
           setState('closed')
           return
         }
         // Everything else (server restart, network drop, expired token)
         // retries with exponential backoff + jitter so a restarting server
         // is not stampeded by every client at once.
-        setState('reconnecting')
-        const backoff = Math.min(MAX_BACKOFF_MS, 1_000 * 2 ** attempt)
-        attempt += 1
-        retryTimer = setTimeout(open, backoff * (0.5 + Math.random() / 2))
+        retry()
       }
 
       socket.onmessage = (raw) => {
@@ -105,13 +114,16 @@ export function useBoardSocket(boardId: string | undefined) {
         }
         const event: BoardEvent = JSON.parse(raw.data)
         if (event.type === 'connected') {
+          attempt = 0
+          setState('live')
           setPeers(event.presence ?? [])
           const current = docRef.current
           if (current && event.ydoc) {
             Y.applyUpdate(current, base64ToBytes(event.ydoc), 'server')
             // Push our full state back: anything drawn while disconnected
             // merges into the server (idempotent for everything it has).
-            socket.send(new Uint8Array(Y.encodeStateAsUpdate(current)))
+            if (event.role !== 'viewer')
+              socket.send(new Uint8Array(Y.encodeStateAsUpdate(current)))
             setDocReady(true)
           }
         }

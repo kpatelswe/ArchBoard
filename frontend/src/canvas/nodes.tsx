@@ -27,7 +27,7 @@ function TechnologyMenu({ id, data, selected }: Props) {
   const entry = CATALOG[data.kind]
   const tech = technologyOf(data)
 
-  if (!entry.technologies) return null
+  if (!entry.technologies || !doc) return null
 
   // A remote peer may have set a value outside our suggestion list.
   const options = tech && !entry.technologies.includes(tech)
@@ -39,7 +39,7 @@ function TechnologyMenu({ id, data, selected }: Props) {
     if (value) metadata.technology = value
     else delete metadata.technology
     updateNodeData(id, { metadata })
-    if (doc) setNodeFields(doc, id, { data: { ...data, metadata } })
+    if (doc) setNodeFields(doc, id, { 'data:technology': value || null })
   }
 
   return (
@@ -91,10 +91,11 @@ export function ArchitectureNode(props: Props) {
 }
 
 export function StickyNoteNode({ id, data, selected }: Props) {
+  const doc = useBoardDoc()
   return (
     <div className={`node node--sticky ${selected ? 'is-selected' : ''}`}>
       <RemoteEditorTag id={id} />
-      <NodeResizer minWidth={120} minHeight={90} isVisible={selected} />
+      <NodeResizer minWidth={120} minHeight={90} isVisible={selected && !!doc} />
       <EditableLabel id={id} value={data.label} multiline placeholder="Note…" />
     </div>
   )
@@ -110,10 +111,11 @@ export function TextNode({ id, data, selected }: Props) {
 }
 
 export function ShapeNode({ id, data, selected }: Props) {
+  const doc = useBoardDoc()
   return (
     <div className={`node node--shape ${selected ? 'is-selected' : ''}`}>
       <RemoteEditorTag id={id} />
-      <NodeResizer minWidth={80} minHeight={60} isVisible={selected} />
+      <NodeResizer minWidth={80} minHeight={60} isVisible={selected && !!doc} />
       <span className="node__shape-label">
         <EditableLabel id={id} value={data.label} placeholder="Label" />
       </span>
