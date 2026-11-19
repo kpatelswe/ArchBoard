@@ -45,9 +45,9 @@ class BoardState:
         self._dirty = False
         self._superseded = False
         self._flush_task: asyncio.Task | None = None
-        self._journal_key = unsaved.key_for(board_id, uuid.uuid4().hex)
-        # Journal entries (this replica's stash, or ones it recovered) that
-        # are cleared only once their edits are saved.
+        # Journal entries (this replica's stashes, or ones it recovered) that
+        # are cleared only once their edits are saved. Every stash gets a new
+        # key, so deleting a key never deletes edits stashed after it was read.
         self._journal_keys: set[str] = set()
 
     @classmethod
@@ -172,9 +172,10 @@ class BoardState:
 
     async def stash_unsaved(self) -> None:
         """Journal the unsaved doc in Redis so a worker restart cannot lose it."""
+        key = unsaved.key_for(self.board_id, uuid.uuid4().hex)
         try:
             await unsaved.stash(
-                self._journal_key,
+                key,
                 base_version=self.version,
                 base_state=self._base_state,
                 update=self.encoded_state(),
@@ -182,7 +183,7 @@ class BoardState:
         except Exception:
             logger.exception("could not stash unsaved board: %s", self.board_id)
             return
-        self._journal_keys.add(self._journal_key)
+        self._journal_keys.add(key)
 
     async def _clear_journal(self) -> None:
         if not self._journal_keys:
