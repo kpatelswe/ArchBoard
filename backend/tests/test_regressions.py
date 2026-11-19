@@ -61,6 +61,79 @@ async def test_failed_release_retains_state(monkeypatch):
         await registry.release(state.board_id, lambda: 0)
     assert registry.peek(state.board_id) is state
     assert state._dirty
+    registry._retries[state.board_id].cancel()
+
+
+async def test_idle_retry_persists_after_recovery(monkeypatch):
+    mock_session(monkeypatch)
+    monkeypatch.setattr('app.realtime.state.FLUSH_SECONDS', 0.01)
+    save = AsyncMock(side_effect=[OSError, OSError, SimpleNamespace(version=1)])
+    monkeypatch.setattr('app.realtime.state.board_repository.update_snapshot', save)
+    state = state_with_node()
+    state._dirty = True
+    registry = BoardStateRegistry()
+    registry._states[state.board_id] = state
+    with pytest.raises(OSError):
+        await registry.release(state.board_id, lambda: 0)
+    await asyncio.wait_for(registry._retries[state.board_id], 1)
+    assert save.await_count == 3
+    assert not state._dirty
+    assert registry.peek(state.board_id) is None
+
+
+async def test_idle_retry_hands_back_to_rejoined_session(monkeypatch):
+    mock_session(monkeypatch)
+    monkeypatch.setattr('app.realtime.state.FLUSH_SECONDS', 0.01)
+    save = AsyncMock(side_effect=OSError)
+    monkeypatch.setattr('app.realtime.state.board_repository.update_snapshot', save)
+    state = state_with_node()
+    state._dirty = True
+    registry = BoardStateRegistry()
+    registry._states[state.board_id] = state
+    count = 0
+    with pytest.raises(OSError):
+        await registry.release(state.board_id, lambda: count)
+    first = registry._retries[state.board_id]
+    count = 1
+    assert await registry.acquire(state.board_id) is state
+    await asyncio.wait_for(first, 1)
+    assert save.await_count == 1
+    count = 0
+    save.side_effect = None
+    save.return_value = SimpleNamespace(version=1)
+    await registry.release(state.board_id, lambda: count)
+    assert registry.peek(state.board_id) is None
+
+
+async def test_idle_retry_yields_to_rest_save(monkeypatch):
+    mock_session(monkeypatch)
+    monkeypatch.setattr('app.realtime.state.FLUSH_SECONDS', 0.01)
+    save = AsyncMock(side_effect=[OSError, None])
+    monkeypatch.setattr('app.realtime.state.board_repository.update_snapshot', save)
+    monkeypatch.setattr('app.realtime.state.board_repository.get', AsyncMock(
+        return_value=SimpleNamespace(version=5, ydoc_state=None)))
+    state = state_with_node()
+    state._dirty = True
+    registry = BoardStateRegistry()
+    registry._states[state.board_id] = state
+    with pytest.raises(OSError):
+        await registry.release(state.board_id, lambda: 0)
+    await asyncio.wait_for(registry._retries[state.board_id], 1)
+    assert save.await_count == 2
+    assert registry.peek(state.board_id) is None
+
+
+async def test_live_flush_still_merges_over_conflicts(monkeypatch):
+    mock_session(monkeypatch)
+    save = AsyncMock(side_effect=[None, SimpleNamespace(version=6)])
+    monkeypatch.setattr('app.realtime.state.board_repository.update_snapshot', save)
+    monkeypatch.setattr('app.realtime.state.board_repository.get', AsyncMock(
+        return_value=SimpleNamespace(version=5, ydoc_state=None)))
+    state = state_with_node()
+    state._dirty = True
+    await state.flush()
+    assert save.await_count == 2
+    assert state.version == 6 and not state._superseded
 
 
 async def test_release_rechecks_connections_after_waiting():
@@ -219,8 +292,18 @@ async def test_rejected_document_closes_socket(monkeypatch, oversized):
     monkeypatch.setattr(routes, '_teardown', AsyncMock())
     monkeypatch.setattr(routes.rate_limit, 'register_event', AsyncMock(return_value=rate_limit.MAX_UPDATES_PER_WINDOW + 1))
     socket = SimpleNamespace(
-        query_params={'token': 'test'}, accept=AsyncMock(), send_json=AsyncMock(), close=AsyncMock(),
+        query_params={'token': 'test', 'protocol': routes.CLIENT_PROTOCOL}, accept=AsyncMock(), send_json=AsyncMock(), close=AsyncMock(),
         receive=AsyncMock(return_value={'type': 'websocket.receive', 'bytes': b'x' * (routes.MAX_FRAME_BYTES + 1 if oversized else 1)}),
     )
     await routes.board_websocket(socket, board)
     assert socket.close.call_args.args[0] == (4400 if oversized else routes.CLOSE_RATE_LIMITED)
+
+
+@pytest.mark.parametrize('params', [{'token': 'test'}, {'token': 'test', 'protocol': '1'}])
+async def test_outdated_client_is_refused(monkeypatch, params):
+    verify = MagicMock()
+    monkeypatch.setattr(routes, 'verify_session_token', verify)
+    socket = SimpleNamespace(query_params=params, accept=AsyncMock(), close=AsyncMock())
+    await routes.board_websocket(socket, uuid.uuid4())
+    socket.close.assert_awaited_once_with(routes.CLOSE_FORBIDDEN, routes.OUTDATED_CLIENT_REASON)
+    verify.assert_not_called()

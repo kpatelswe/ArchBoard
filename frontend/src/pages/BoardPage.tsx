@@ -98,7 +98,8 @@ export function BoardPage() {
   if (error) return <p className="status status--unreachable">{error}</p>
   if (!board) return <p className="status status--checking">Loading board…</p>
 
-  const readOnly = board.role === 'viewer'
+  const outdated = socket.state === 'outdated'
+  const readOnly = board.role === 'viewer' || outdated
 
   return (
     <section className="board">
@@ -140,7 +141,9 @@ export function BoardPage() {
               ? `${socket.peers.length} online`
               : socket.state === 'reconnecting'
                 ? 'reconnecting…'
-                : socket.state}
+                : outdated
+                  ? 'update available'
+                  : socket.state}
           </span>
           <span className="board__save">
             {readOnly ? 'view only' : socketLive ? 'synced' : 'offline'}
@@ -165,6 +168,14 @@ export function BoardPage() {
           )}
         </div>
       </div>
+      {outdated && (
+        <p className="notice" role="alert">
+          ArchBoard was updated. Reload to keep editing.{' '}
+          <button className="btn btn--small" type="button" onClick={() => window.location.reload()}>
+            Reload
+          </button>
+        </p>
+      )}
       {shareMessage && <p className="notice" role="status">{shareMessage}</p>}
       {shareLink && <input className="input" aria-label="Invite link" value={shareLink} readOnly onFocus={(event) => event.target.select()} />}
       <div className="board__body">

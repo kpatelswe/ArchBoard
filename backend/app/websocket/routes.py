@@ -25,6 +25,13 @@ CLOSE_UNAUTHENTICATED = 4401
 CLOSE_FORBIDDEN = 4403
 CLOSE_RATE_LIMITED = 4429  # mirrors HTTP 429
 
+# Bumped when the CRDT document layout changes. Tabs still running an older
+# frontend would write the old layout (e.g. replacing a node's whole `data`
+# object, which field-level `data:*` keys then shadow), so they are refused
+# with the one close code every client version treats as final.
+CLIENT_PROTOCOL = "2"
+OUTDATED_CLIENT_REASON = "client outdated: reload the page"
+
 # Not a memory defense: this runs after the frame is already in memory.
 # uvicorn's --ws-max-size (Dockerfile) is the real intake cap; this mirrors
 # it so a dev server started without the flag behaves the same. 1MB rather
@@ -78,6 +85,10 @@ async def board_websocket(websocket: WebSocket, board_id: uuid.UUID) -> None:
     # no close code, which the browser reports uselessly. Accepting and then
     # closing lets the client read *why*.
     await websocket.accept()
+
+    if websocket.query_params.get("protocol") != CLIENT_PROTOCOL:
+        await websocket.close(CLOSE_FORBIDDEN, OUTDATED_CLIENT_REASON)
+        return
 
     # Browser WebSockets cannot set headers, so the Clerk token rides the
     # query string. It is short-lived (~60s) and the socket outlives it —

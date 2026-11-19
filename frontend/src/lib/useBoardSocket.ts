@@ -6,13 +6,16 @@ import { base64ToBytes, LOCAL_ORIGIN } from './boardDoc'
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 const WS_URL = API_URL.replace(/^http/, 'ws')
 
-type SocketState = 'connecting' | 'live' | 'reconnecting' | 'closed'
+type SocketState = 'connecting' | 'live' | 'reconnecting' | 'closed' | 'outdated'
 
 export type Peer = { user_id: string; name: string | null; avatar_url: string | null }
 
 const HEARTBEAT_MS = 10_000
 const MAX_BACKOFF_MS = 30_000
 const CLOSE_FORBIDDEN = 4403
+// Must match the backend's CLIENT_PROTOCOL; bump with document layout changes.
+const CLIENT_PROTOCOL = '2'
+const OUTDATED_CLIENT_REASON = 'client outdated: reload the page'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type BoardEvent = Record<string, any> & { type: string }
@@ -86,7 +89,7 @@ export function useBoardSocket(boardId: string | undefined) {
         return
       }
       const socket = new WebSocket(
-        `${WS_URL}/ws/boards/${boardId}?token=${token}`,
+        `${WS_URL}/ws/boards/${boardId}?token=${token}&protocol=${CLIENT_PROTOCOL}`,
       )
       socket.binaryType = 'arraybuffer'
       socketRef.current = socket
@@ -95,6 +98,10 @@ export function useBoardSocket(boardId: string | undefined) {
         if (cancelled) return
         socketRef.current = null
         // Forbidden is final — retrying a revoked membership just spams.
+        if (event.code === CLOSE_FORBIDDEN && event.reason === OUTDATED_CLIENT_REASON) {
+          setState('outdated')
+          return
+        }
         if (event.code === CLOSE_FORBIDDEN || event.code === 4400) {
           setState('closed')
           return

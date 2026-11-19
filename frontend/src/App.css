@@ -527,7 +527,8 @@
   background: var(--warn);
 }
 
-.board__live--closed::before {
+.board__live--closed::before,
+.board__live--outdated::before {
   background: var(--danger);
 }
 
