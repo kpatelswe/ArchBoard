@@ -61,7 +61,7 @@ async def test_failed_release_retains_state(monkeypatch):
         await registry.release(state.board_id, lambda: 0)
     assert registry.peek(state.board_id) is state
     assert state._dirty
-    registry._retries[state.board_id].cancel()
+    registry._retries[state.board_id][1].cancel()
 
 
 async def test_idle_retry_persists_after_recovery(monkeypatch):
@@ -75,7 +75,9 @@ async def test_idle_retry_persists_after_recovery(monkeypatch):
     registry._states[state.board_id] = state
     with pytest.raises(OSError):
         await registry.release(state.board_id, lambda: 0)
-    await asyncio.wait_for(registry._retries[state.board_id], 1)
+    await asyncio.wait_for(registry._retries[state.board_id][1], 1)
+    await asyncio.sleep(0)
+    assert state.board_id not in registry._retries
     assert save.await_count == 3
     assert not state._dirty
     assert registry.peek(state.board_id) is None
@@ -93,16 +95,47 @@ async def test_idle_retry_hands_back_to_rejoined_session(monkeypatch):
     count = 0
     with pytest.raises(OSError):
         await registry.release(state.board_id, lambda: count)
-    first = registry._retries[state.board_id]
+    first = registry._retries[state.board_id][1]
     count = 1
     assert await registry.acquire(state.board_id) is state
     await asyncio.wait_for(first, 1)
+    await asyncio.sleep(0)
     assert save.await_count == 1
+    assert state.board_id not in registry._retries
     count = 0
     save.side_effect = None
     save.return_value = SimpleNamespace(version=1)
     await registry.release(state.board_id, lambda: count)
     assert registry.peek(state.board_id) is None
+
+
+async def test_replacement_replica_gets_its_own_retry(monkeypatch):
+    mock_session(monkeypatch)
+    monkeypatch.setattr('app.realtime.state.FLUSH_SECONDS', 0.05)
+    save = AsyncMock(side_effect=[OSError, SimpleNamespace(version=1), OSError, SimpleNamespace(version=2)])
+    monkeypatch.setattr('app.realtime.state.board_repository.update_snapshot', save)
+    old = state_with_node()
+    old._dirty = True
+    registry = BoardStateRegistry()
+    registry._states[old.board_id] = old
+    with pytest.raises(OSError):
+        await registry.release(old.board_id, lambda: 0)
+    stale = registry._retries[old.board_id][1]
+    await registry.release(old.board_id, lambda: 0)  # rejoin, edit, leave: saved and evicted
+    assert registry.peek(old.board_id) is None
+    await asyncio.sleep(0)
+    assert stale.cancelled() and old.board_id not in registry._retries
+    replacement = BoardState(old.board_id, old.doc, 1)
+    replacement._dirty = True
+    registry._states[old.board_id] = replacement
+    with pytest.raises(OSError):
+        await registry.release(old.board_id, lambda: 0)
+    owner, task = registry._retries[old.board_id]
+    assert owner is replacement
+    await asyncio.wait_for(task, 1)
+    assert save.await_count == 4
+    assert not replacement._dirty
+    assert registry.peek(old.board_id) is None
 
 
 async def test_idle_retry_yields_to_rest_save(monkeypatch):
@@ -118,7 +151,9 @@ async def test_idle_retry_yields_to_rest_save(monkeypatch):
     registry._states[state.board_id] = state
     with pytest.raises(OSError):
         await registry.release(state.board_id, lambda: 0)
-    await asyncio.wait_for(registry._retries[state.board_id], 1)
+    await asyncio.wait_for(registry._retries[state.board_id][1], 1)
+    await asyncio.sleep(0)
+    assert state.board_id not in registry._retries
     assert save.await_count == 2
     assert registry.peek(state.board_id) is None
 

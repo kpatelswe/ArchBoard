@@ -181,7 +181,9 @@ class BoardStateRegistry:
     def __init__(self) -> None:
         self._states: dict[uuid.UUID, BoardState] = {}
         self._load_lock = asyncio.Lock()
-        self._retries: dict[uuid.UUID, asyncio.Task] = {}
+        # Each retry belongs to one replica: a board evicted and reloaded gets
+        # a fresh BoardState, and its retry must not be shadowed by the old one.
+        self._retries: dict[uuid.UUID, tuple[BoardState, asyncio.Task]] = {}
 
     async def acquire(self, board_id: uuid.UUID) -> BoardState:
         # The lock closes the gap where two first-connections both see "not
@@ -226,12 +228,27 @@ class BoardStateRegistry:
             return  # a live connection owns it; its release settles it again
         if not state._dirty:
             self._states.pop(board_id, None)
+            self._cancel_retry(board_id)
             return
-        retry = self._retries.get(board_id)
-        if retry is None or retry.done():
-            self._retries[board_id] = asyncio.create_task(
-                self._retry_persist(board_id, state, remaining_connections)
-            )
+        current = self._retries.get(board_id)
+        if current is not None and current[0] is state and not current[1].done():
+            return
+        self._cancel_retry(board_id)
+        task = asyncio.create_task(self._retry_persist(board_id, state, remaining_connections))
+        task.add_done_callback(lambda done: self._forget_retry(board_id, done))
+        self._retries[board_id] = (state, task)
+
+    def _cancel_retry(self, board_id: uuid.UUID) -> None:
+        # Callers hold the load lock, so the retry is asleep or waiting for
+        # the lock, never mid-save.
+        entry = self._retries.pop(board_id, None)
+        if entry is not None:
+            entry[1].cancel()
+
+    def _forget_retry(self, board_id: uuid.UUID, task: asyncio.Task) -> None:
+        entry = self._retries.get(board_id)
+        if entry is not None and entry[1] is task:
+            del self._retries[board_id]
 
     async def _retry_persist(
         self, board_id: uuid.UUID, state: BoardState, remaining_connections: Callable[[], int]
