@@ -20,6 +20,7 @@ function componentPosition(id: ComponentId, firstLesson: boolean) {
 
 export function LearningPage() {
   const headingRef = useRef<HTMLHeadingElement>(null)
+  const lessonNavRef = useRef<HTMLElement>(null)
   const [progress, setProgress] = useState(loadProgress)
   const [source, setSource] = useState<ComponentId | null>(null)
   const [inspected, setInspected] = useState<ComponentId>('user')
@@ -37,6 +38,16 @@ export function LearningPage() {
   const completed = progress.completed.includes(lesson.id)
   const event = traceIndex === null ? null : lesson.trace[traceIndex]
   const traceFinished = traceIndex === lesson.trace.length - 1
+
+  useEffect(() => {
+    const nav = lessonNavRef.current
+    const active = nav?.querySelector<HTMLButtonElement>('[aria-current="step"]')
+    if (!nav || !active) return
+    const bounds = nav.getBoundingClientRect()
+    const tile = active.getBoundingClientRect()
+    const offset = tile.left < bounds.left ? tile.left - bounds.left - 18 : tile.right > bounds.right ? tile.right - bounds.right + 18 : 0
+    if (offset) nav.scrollBy({ left: offset, behavior: 'instant' })
+  }, [progress.active])
 
   useEffect(() => {
     try {
@@ -128,7 +139,7 @@ export function LearningPage() {
               <progress max={LESSONS.length} value={progress.completed.length} aria-label="Lessons completed" />
             </div>
           </div>
-          <nav className="learning__lessons" aria-label="Lessons">
+          <nav ref={lessonNavRef} className="learning__lessons" aria-label="Lessons">
             {LESSONS.map((item, index) => (
               <button type="button" key={item.id} onClick={() => selectLesson(index)} className={`learning__lesson ${lesson.id === item.id ? 'is-active' : ''}`} aria-current={lesson.id === item.id ? 'step' : undefined}>
                 <span className={`learning__lesson-number ${progress.completed.includes(item.id) ? 'is-done' : ''}`}>{progress.completed.includes(item.id) ? <Check size={14} aria-label="Completed" /> : String(index + 1).padStart(2, '0')}</span>
