@@ -128,28 +128,42 @@ def deep_sync_chain(graph: BoardGraph) -> list[Finding]:
         node_id: [edge for edge in edges if edge.synchronous]
         for node_id, edges in graph.out_edges.items()
     }
-    longest_from: dict[str, tuple[int, list[str]]] = {}
-    in_progress: set[str] = set()
     cycle_members: set[str] = set()
+    stack: list[str] = []
+    cycle_edges: set[str] = set()
+    indices: dict[str, int] = {}
+    low: dict[str, int] = {}
+    on_stack: set[str] = set()
 
-    def longest(node_id: str) -> tuple[int, list[str]]:
-        if node_id in longest_from:
-            return longest_from[node_id]
-        if node_id in in_progress:
-            cycle_members.add(node_id)
-            return (0, [node_id])
-        in_progress.add(node_id)
-        best = (0, [node_id])
+    def visit(node_id: str) -> None:
+        indices[node_id] = low[node_id] = len(indices)
+        stack.append(node_id)
+        on_stack.add(node_id)
         for edge in sync_out[node_id]:
-            hops, path = longest(edge.target)
-            if hops + 1 > best[0]:
-                best = (hops + 1, [node_id, *path])
-        in_progress.discard(node_id)
-        longest_from[node_id] = best
-        return best
+            if edge.target not in indices:
+                visit(edge.target)
+                low[node_id] = min(low[node_id], low[edge.target])
+            elif edge.target in on_stack:
+                low[node_id] = min(low[node_id], indices[edge.target])
+        if low[node_id] == indices[node_id]:
+            component: set[str] = set()
+            while True:
+                member = stack.pop()
+                on_stack.remove(member)
+                component.add(member)
+                if member == node_id:
+                    break
+            internal = [
+                edge for member in component for edge in sync_out[member]
+                if edge.target in component
+            ]
+            if len(component) > 1 or internal:
+                cycle_members.update(component)
+                cycle_edges.update(edge.id for edge in internal)
 
     for node_id in graph.nodes:
-        longest(node_id)
+        if node_id not in indices:
+            visit(node_id)
 
     if cycle_members:
         members = sorted(cycle_members)
@@ -166,9 +180,25 @@ def deep_sync_chain(graph: BoardGraph) -> list[Finding]:
                 "asynchronous or disappear.",
                 when_its_fine="It isn't. Async cycles can be fine; sync ones are not.",
                 node_ids=members,
+                edge_ids=sorted(cycle_edges),
             )
         ]
 
+    longest_from: dict[str, tuple[int, list[str]]] = {}
+
+    def longest(node_id: str) -> tuple[int, list[str]]:
+        if node_id in longest_from:
+            return longest_from[node_id]
+        best = (0, [node_id])
+        for edge in sync_out[node_id]:
+            hops, path = longest(edge.target)
+            if hops + 1 > best[0]:
+                best = (hops + 1, [node_id, *path])
+        longest_from[node_id] = best
+        return best
+
+    for node_id in graph.nodes:
+        longest(node_id)
     if not longest_from:  # empty board
         return []
     hops, path = max(longest_from.values(), key=lambda item: item[0])

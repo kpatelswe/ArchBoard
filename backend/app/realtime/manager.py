@@ -38,8 +38,11 @@ class ConnectionManager:
         if not connections:
             del self._boards[board_id]  # don't leak empty sets forever
 
-    def count(self, board_id: uuid.UUID) -> int:
-        return len(self._boards.get(board_id, ()))
+    def count(self, board_id: uuid.UUID, user_id: uuid.UUID | None = None) -> int:
+        return sum(
+            1 for connection in self._boards.get(board_id, ())
+            if user_id is None or connection.user_id == user_id
+        )
 
     async def broadcast(
         self,

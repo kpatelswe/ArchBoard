@@ -19,7 +19,20 @@ function yMapFrom(fields: Record<string, unknown>): Y.Map<unknown> {
 export function flowFromDoc(doc: Y.Doc): { nodes: Node[]; edges: Edge[] } {
   const nodes: Node[] = []
   const edges: Edge[] = []
-  nodesMap(doc).forEach((value) => nodes.push(value.toJSON() as Node))
+  nodesMap(doc).forEach((value) => {
+    const node = value.toJSON()
+    const data = { ...node.data }
+    if (value.has('data:label')) data.label = value.get('data:label')
+    if (value.has('data:technology')) {
+      data.metadata = { ...data.metadata }
+      const technology = value.get('data:technology')
+      if (technology) data.metadata.technology = technology
+      else delete data.metadata.technology
+    }
+    delete node['data:label']
+    delete node['data:technology']
+    nodes.push({ ...node, data } as Node)
+  })
   edgesMap(doc).forEach((value) =>
     edges.push({
       ...(value.toJSON() as Edge),
@@ -33,6 +46,16 @@ export function upsertNode(doc: Y.Doc, node: Node) {
   doc.transact(() => {
     nodesMap(doc).set(node.id, yMapFrom(canonicalNode(node)))
   }, LOCAL_ORIGIN)
+}
+
+export function reconcileNodes(derived: Node[], current: Node[]): Node[] {
+  const previous = new Map(current.map((node) => [node.id, node]))
+  return derived.map((node) => {
+    const existing = previous.get(node.id)
+    return existing
+      ? { ...node, measured: existing.measured, selected: existing.selected, dragging: existing.dragging }
+      : node
+  })
 }
 
 /** Set only the given top-level fields, leaving siblings for others to edit. */

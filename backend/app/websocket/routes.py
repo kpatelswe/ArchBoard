@@ -25,6 +25,13 @@ CLOSE_UNAUTHENTICATED = 4401
 CLOSE_FORBIDDEN = 4403
 CLOSE_RATE_LIMITED = 4429  # mirrors HTTP 429
 
+# Bumped when the CRDT document layout changes. Tabs still running an older
+# frontend would write the old layout (e.g. replacing a node's whole `data`
+# object, which field-level `data:*` keys then shadow), so they are refused
+# with the one close code every client version treats as final.
+CLIENT_PROTOCOL = "2"
+OUTDATED_CLIENT_REASON = "client outdated: reload the page"
+
 # Not a memory defense: this runs after the frame is already in memory.
 # uvicorn's --ws-max-size (Dockerfile) is the real intake cap; this mirrors
 # it so a dev server started without the flag behaves the same. 1MB rather
@@ -78,6 +85,10 @@ async def board_websocket(websocket: WebSocket, board_id: uuid.UUID) -> None:
     # no close code, which the browser reports uselessly. Accepting and then
     # closing lets the client read *why*.
     await websocket.accept()
+
+    if websocket.query_params.get("protocol") != CLIENT_PROTOCOL:
+        await websocket.close(CLOSE_FORBIDDEN, OUTDATED_CLIENT_REASON)
+        return
 
     # Browser WebSockets cannot set headers, so the Clerk token rides the
     # query string. It is short-lived (~60s) and the socket outlives it —
@@ -164,11 +175,11 @@ async def board_websocket(websocket: WebSocket, board_id: uuid.UUID) -> None:
                     "websocket frame too large: %d bytes user=%s board=%s",
                     frame_bytes, user_id, board_id,
                 )
-                await websocket.send_json(events.error_frame("frame too large"))
-                continue
+                await websocket.close(4400, "frame too large")
+                break
 
-            count = await rate_limit.register_event(user_id, board_id)
-            action = rate_limit.verdict(count)
+            count = await rate_limit.register_event(user_id, board_id, document=update is not None)
+            action = rate_limit.verdict(count, document=update is not None)
             if action == "disconnect":
                 # Sustained flooding: stop paying to read this socket at all.
                 logger.warning(
@@ -198,10 +209,8 @@ async def board_websocket(websocket: WebSocket, board_id: uuid.UUID) -> None:
                 try:
                     state.apply_update(update)
                 except Exception:
-                    await websocket.send_json(
-                        events.error_frame("malformed CRDT update")
-                    )
-                    continue
+                    await websocket.close(4400, "malformed CRDT update")
+                    break
                 state.schedule_flush()
                 await _publish(
                     board_id,
@@ -270,13 +279,14 @@ async def _teardown(board_id: uuid.UUID, connection: BoardConnection) -> None:
     if manager.count(board_id) == 0:
         await _attempt("bus.unsubscribe", bus.unsubscribe(board_id))
     await _attempt(
-        "registry.release", registry.release(board_id, manager.count(board_id))
+        "registry.release", registry.release(board_id, lambda: manager.count(board_id))
     )
-    await _attempt("presence.clear", presence.clear(board_id, connection.user_id))
-    await _attempt(
-        "publish board.left",
-        _publish(board_id, {"type": "board.left", "user_id": str(connection.user_id)}),
-    )
+    if manager.count(board_id, connection.user_id) == 0:
+        await _attempt("presence.clear", presence.clear(board_id, connection.user_id))
+        await _attempt(
+            "publish board.left",
+            _publish(board_id, {"type": "board.left", "user_id": str(connection.user_id)}),
+        )
 
 
 async def _attempt(what: str, step: Awaitable[None]) -> None:
