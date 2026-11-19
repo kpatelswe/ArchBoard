@@ -21,6 +21,7 @@ import type * as Y from 'yjs'
 import {
   flowFromDoc,
   LOCAL_ORIGIN,
+  reconcileNodes,
   removeEdge,
   removeNode,
   setNodeFields,
@@ -125,14 +126,7 @@ function Canvas({
     if (!doc || !docReady) return
     const syncFromDoc = () => {
       const derived = flowFromDoc(doc)
-      setNodes((current) =>
-        derived.nodes.map((node) => {
-          const previous = current.find((existing) => existing.id === node.id)
-          return previous
-            ? { ...node, selected: previous.selected, dragging: previous.dragging }
-            : node
-        }),
-      )
+      setNodes((current) => reconcileNodes(derived.nodes, current))
       setEdges((current) =>
         derived.edges.map((edge) => {
           const previous = current.find((existing) => existing.id === edge.id)

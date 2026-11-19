@@ -48,6 +48,16 @@ export function upsertNode(doc: Y.Doc, node: Node) {
   }, LOCAL_ORIGIN)
 }
 
+export function reconcileNodes(derived: Node[], current: Node[]): Node[] {
+  const previous = new Map(current.map((node) => [node.id, node]))
+  return derived.map((node) => {
+    const existing = previous.get(node.id)
+    return existing
+      ? { ...node, measured: existing.measured, selected: existing.selected, dragging: existing.dragging }
+      : node
+  })
+}
+
 /** Set only the given top-level fields, leaving siblings for others to edit. */
 export function setNodeFields(
   doc: Y.Doc,
