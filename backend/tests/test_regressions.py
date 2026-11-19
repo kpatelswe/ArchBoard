@@ -44,7 +44,7 @@ async def test_flush_failure_retries_on_release(monkeypatch):
     with pytest.raises(OSError, match='offline'):
         await state.flush()
     assert state._dirty
-    await registry.release(state.board_id, 0)
+    await registry.release(state.board_id, lambda: 0)
     assert save.await_count == 2
     assert not state._dirty
     assert registry.peek(state.board_id) is None
@@ -58,9 +58,25 @@ async def test_failed_release_retains_state(monkeypatch):
     registry = BoardStateRegistry()
     registry._states[state.board_id] = state
     with pytest.raises(OSError):
-        await registry.release(state.board_id, 0)
+        await registry.release(state.board_id, lambda: 0)
     assert registry.peek(state.board_id) is state
     assert state._dirty
+
+
+async def test_release_rechecks_connections_after_waiting():
+    state = state_with_node()
+    registry = BoardStateRegistry()
+    registry._states[state.board_id] = state
+    count = 0
+    async with registry._load_lock:
+        releasing = asyncio.create_task(registry.release(state.board_id, lambda: count))
+        await asyncio.sleep(0)
+        count = 1
+    await releasing
+    assert registry.peek(state.board_id) is state
+    count = 0
+    await registry.release(state.board_id, lambda: count)
+    assert registry.peek(state.board_id) is None
 
 
 async def test_clean_flush_does_not_open_session(monkeypatch):

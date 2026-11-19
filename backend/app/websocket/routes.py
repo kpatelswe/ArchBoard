@@ -268,7 +268,7 @@ async def _teardown(board_id: uuid.UUID, connection: BoardConnection) -> None:
     if manager.count(board_id) == 0:
         await _attempt("bus.unsubscribe", bus.unsubscribe(board_id))
     await _attempt(
-        "registry.release", registry.release(board_id, manager.count(board_id))
+        "registry.release", registry.release(board_id, lambda: manager.count(board_id))
     )
     if manager.count(board_id, connection.user_id) == 0:
         await _attempt("presence.clear", presence.clear(board_id, connection.user_id))

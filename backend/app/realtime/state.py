@@ -16,6 +16,7 @@ the one concurrency problem CRDTs genuinely erase.
 import asyncio
 import contextlib
 import uuid
+from collections.abc import Callable
 
 from pycrdt import Doc, Map
 from pydantic import ValidationError
@@ -182,10 +183,12 @@ class BoardStateRegistry:
     def peek(self, board_id: uuid.UUID) -> BoardState | None:
         return self._states.get(board_id)
 
-    async def release(self, board_id: uuid.UUID, remaining_connections: int) -> None:
-        if remaining_connections > 0:
+    async def release(self, board_id: uuid.UUID, remaining_connections: Callable[[], int]) -> None:
+        if remaining_connections() > 0:
             return
         async with self._load_lock:
+            if remaining_connections() > 0:
+                return
             state = self._states.get(board_id)
             if state is not None:
                 if state._flush_task is not None:
@@ -193,7 +196,7 @@ class BoardStateRegistry:
                     with contextlib.suppress(asyncio.CancelledError, Exception):
                         await state._flush_task
                 await state.flush()  # last one out turns off the lights, durably
-                if not state._dirty:
+                if not state._dirty and remaining_connections() == 0:
                     self._states.pop(board_id, None)
 
 
